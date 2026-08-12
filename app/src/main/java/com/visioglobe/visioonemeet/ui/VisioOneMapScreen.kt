@@ -184,7 +184,7 @@ private fun OccupancySimulationPanel(
             modifier = Modifier.weight(1f),
         )
         Spacer(modifier = Modifier.width(8.dp))
-        Button(onClick = onToggle) {
+        Button(onClick = onToggle, enabled = simulating || placeId.isNotBlank()) {
             Text(if (simulating) "Stop occupancy simulation" else "Simulate occupancy")
         }
     }
