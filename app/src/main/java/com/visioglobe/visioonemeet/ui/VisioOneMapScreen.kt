@@ -9,12 +9,20 @@ import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -25,13 +33,39 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.webkit.WebViewAssetLoader
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import org.json.JSONArray
+import org.json.JSONObject
 
 private const val ASSET_LOADER_DOMAIN = "appassets.androidx.local"
+
+// Stand-in for a real occupancy sensor feed: cycles a POI's surface through
+// these colors on a timer. See docs/features/occupancy-simulated.md.
+private val OCCUPANCY_COLORS = listOf("#2ECC71", "#F1C40F", "#E74C3C")
+private const val OCCUPANCY_INTERVAL_MS = 2500L
 
 private sealed interface MapLoadState {
     data object Loading : MapLoadState
     data object Ready : MapLoadState
     data class Error(val message: String) : MapLoadState
+}
+
+/**
+ * Calls `window.MapBridge.updateOccupancy` in the WebView. `color: null` resets the surface to
+ * its normal appearance rather than a hardcoded default.
+ *
+ * Arguments are JSON-encoded via [org.json] before being interpolated into the generated script
+ * — never raw string concatenation, to avoid JS injection (same rule as the other platforms'
+ * native<->JS bridges, see docs/COMMUNICATION_GUIDE.md equivalents).
+ */
+private fun WebView.updateOccupancy(planId: String, color: String?) {
+    val entry = JSONObject().apply {
+        put("planId", planId)
+        put("color", color ?: JSONObject.NULL)
+    }
+    val script = "window.MapBridge.updateOccupancy(${JSONArray().put(entry)})"
+    evaluateJavascript(script, null)
 }
 
 /**
@@ -43,6 +77,9 @@ private sealed interface MapLoadState {
 fun VisioOneMapScreen(mapHash: String, modifier: Modifier = Modifier) {
     var loadState by remember { mutableStateOf<MapLoadState>(MapLoadState.Loading) }
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
+    var webView by remember { mutableStateOf<WebView?>(null) }
+    var placeId by remember { mutableStateOf("") }
+    var simulatingOccupancy by remember { mutableStateOf(false) }
 
     Box(modifier = modifier.fillMaxSize()) {
         AndroidView(
@@ -79,7 +116,7 @@ fun VisioOneMapScreen(mapHash: String, modifier: Modifier = Modifier) {
                     }
 
                     loadUrl("https://$ASSET_LOADER_DOMAIN/assets/www/index.html?hash=$mapHash")
-                }
+                }.also { webView = it }
             },
         )
 
@@ -95,7 +132,60 @@ fun VisioOneMapScreen(mapHash: String, modifier: Modifier = Modifier) {
                 color = MaterialTheme.colorScheme.error,
             )
 
-            is MapLoadState.Ready -> Unit
+            is MapLoadState.Ready ->
+                OccupancySimulationPanel(
+                    placeId = placeId,
+                    onPlaceIdChange = { placeId = it },
+                    simulating = simulatingOccupancy,
+                    onToggle = { simulatingOccupancy = !simulatingOccupancy },
+                    modifier = Modifier.align(Alignment.BottomCenter),
+                )
+        }
+
+        LaunchedEffect(simulatingOccupancy, placeId, webView) {
+            val targetPlaceId = placeId.trim()
+            val view = webView
+            if (!simulatingOccupancy || targetPlaceId.isEmpty() || view == null) return@LaunchedEffect
+
+            var colorIndex = 0
+            view.updateOccupancy(targetPlaceId, OCCUPANCY_COLORS[colorIndex])
+            try {
+                while (isActive) {
+                    delay(OCCUPANCY_INTERVAL_MS)
+                    colorIndex = (colorIndex + 1) % OCCUPANCY_COLORS.size
+                    view.updateOccupancy(targetPlaceId, OCCUPANCY_COLORS[colorIndex])
+                }
+            } finally {
+                // Reset the surface rather than leaving it stuck on the last simulated color.
+                view.updateOccupancy(targetPlaceId, null)
+            }
+        }
+    }
+}
+
+@Composable
+private fun OccupancySimulationPanel(
+    placeId: String,
+    onPlaceIdChange: (String) -> Unit,
+    simulating: Boolean,
+    onToggle: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(12.dp),
+    ) {
+        OutlinedTextField(
+            value = placeId,
+            onValueChange = onPlaceIdChange,
+            label = { Text("Place ID") },
+            singleLine = true,
+            modifier = Modifier.weight(1f),
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Button(onClick = onToggle, enabled = simulating || placeId.isNotBlank()) {
+            Text(if (simulating) "Stop occupancy simulation" else "Simulate occupancy")
         }
     }
 }

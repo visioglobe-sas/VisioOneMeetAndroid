@@ -11,10 +11,29 @@ const container = document.querySelector('#content');
 // used to reflect the map's loading state in the native Compose UI.
 const bridge = window.AndroidBridge;
 
+let venue = null;
+
+// Native -> JS bridge: one method per command, called from Kotlin via
+// WebView.evaluateJavascript(). Kotlin JSON-encodes arguments before
+// interpolating them into the generated script call, so what arrives here
+// is already a real JS value (array/object), never a string to re-parse.
+window.MapBridge = {
+  updateOccupancy(occupancy) {
+    if (!venue) return;
+    occupancy.forEach((entry) => {
+      const poi = venue.pois.find((p) => p.id === entry.planId);
+      if (!poi) return;
+      poi.surfaces.forEach((surface) => {
+        venue.updateSurface(surface, { color: entry.color });
+      });
+    });
+  },
+};
+
 async function main() {
   try {
     const visioOne = createVisioOne();
-    const venue = await visioOne.loadVenue({ hash });
+    venue = await visioOne.loadVenue({ hash });
     await visioOne.createView(container, venue);
     bridge?.onMapReady();
   } catch (error) {
