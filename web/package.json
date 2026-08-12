@@ -1,0 +1,17 @@
+{
+  "name": "visioone-webview",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Minimal web page embedding the VisioOne SDK, bundled for use inside the Android app's WebView.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build"
+  },
+  "dependencies": {
+    "@visioglobe/visioone": "1.0.5"
+  },
+  "devDependencies": {
+    "vite": "^5.4.0"
+  }
+}

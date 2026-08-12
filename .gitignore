@@ -1,0 +1,21 @@
+*.iml
+.gradle/
+/local.properties
+.idea/
+.DS_Store
+build/
+/captures
+.externalNativeBuild
+.cxx
+*.apk
+*.ap_
+*.dex
+*.class
+.kotlin/
+
+# Web tooling (Android app only needs the built output committed under app/src/main/assets/www)
+web/node_modules/
+
+# Internal AI assistant config — must never be published
+CLAUDE.md
+.claude/
