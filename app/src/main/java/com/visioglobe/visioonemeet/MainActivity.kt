@@ -9,7 +9,7 @@ import com.visioglobe.visioonemeet.ui.VisioOneMapScreen
 import com.visioglobe.visioonemeet.ui.theme.VisioOneMeetTheme
 
 /** Hash of the VisioOne map to display, as found on the my.visioglobe.com portal. */
-private const val DEFAULT_MAP_HASH = "k5f59b8615f0379390e03e4cbe893ff813b9ac94a"
+private const val DEFAULT_MAP_HASH = "kbae8e6c066cca4b02c2afac2bc963a643d87437a"
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {

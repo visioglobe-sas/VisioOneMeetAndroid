@@ -27,7 +27,7 @@ Une application Android (Kotlin + Jetpack Compose) qui affiche un plan intérieu
 
 L'application n'a qu'un seul écran : une carte intérieure VisioOne plein écran. Plutôt que d'utiliser un SDK Android natif, elle charge le SDK JavaScript `@visioglobe/visioone` dans une `WebView`, avec un vrai bundle Vite construit à la compilation (pas un simple chargement depuis un CDN). Deux repères à garder en tête pendant tout le guide :
 
-- La carte est identifiée par un **hash** de 41 caractères obtenu sur [my.visioglobe.com](https://my.visioglobe.com) (une fois la carte « buildée »). Exemple utilisé ici : `k5f59b8615f0379390e03e4cbe893ff813b9ac94a`.
+- La carte est identifiée par un **hash** de 41 caractères obtenu sur [my.visioglobe.com](https://my.visioglobe.com) (une fois la carte « buildée »). Exemple utilisé ici : `kbae8e6c066cca4b02c2afac2bc963a643d87437a`.
 - Les assets de la carte (POI, étages, meshes 3D) ne sont **pas** embarqués dans l'APK : ils sont téléchargés à l'exécution depuis `mapserver.visioglobe.com`, donc le premier chargement sur émulateur peut prendre 20–30 secondes (gros chunk JS + initialisation WebGL).
 
 ## 2. Architecture générale
@@ -345,7 +345,7 @@ import { createVisioOne } from '@visioglobe/visioone';
 // L'app Android ajoute ?hash=<mapHash> en chargeant cette page (voir
 // VisioOneMapScreen.kt), donc le même bundle peut afficher n'importe quelle
 // carte sans reconstruction.
-const DEFAULT_HASH = 'k5f59b8615f0379390e03e4cbe893ff813b9ac94a';
+const DEFAULT_HASH = 'kbae8e6c066cca4b02c2afac2bc963a643d87437a';
 const hash = new URLSearchParams(window.location.search).get('hash') || DEFAULT_HASH;
 
 const container = document.querySelector('#content');
@@ -520,7 +520,7 @@ import com.visioglobe.visioonemeet.ui.VisioOneMapScreen
 import com.visioglobe.visioonemeet.ui.theme.VisioOneMeetTheme
 
 /** Hash of the VisioOne map to display, as found on the my.visioglobe.com portal. */
-private const val DEFAULT_MAP_HASH = "k5f59b8615f0379390e03e4cbe893ff813b9ac94a"
+private const val DEFAULT_MAP_HASH = "kbae8e6c066cca4b02c2afac2bc963a643d87437a"
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {

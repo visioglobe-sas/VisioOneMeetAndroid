@@ -110,7 +110,7 @@ Vous devez voir apparaître `app`, `web`, `gradlew`, `settings.gradle.kts` parmi
 3. Sur la page de la carte publiée, repérez le **hash** : une chaîne de 41 caractères alphanumériques (lettres et chiffres), par exemple :
 
    ```
-   k5f59b8615f0379390e03e4cbe893ff813b9ac94a
+   kbae8e6c066cca4b02c2afac2bc963a643d87437a
    ```
 
 4. Copiez cette chaîne exactement telle quelle — pas d'espace avant/après, respectez les majuscules/minuscules.
@@ -130,7 +130,7 @@ Vous devez voir apparaître `app`, `web`, `gradlew`, `settings.gradle.kts` parmi
 2. Repérez cette ligne, tout en haut du fichier :
 
    ```kotlin
-   private const val DEFAULT_MAP_HASH = "k5f59b8615f0379390e03e4cbe893ff813b9ac94a"
+   private const val DEFAULT_MAP_HASH = "kbae8e6c066cca4b02c2afac2bc963a643d87437a"
    ```
 
 3. Remplacez la chaîne entre guillemets par le hash récupéré à la Partie D, en gardant les guillemets :
