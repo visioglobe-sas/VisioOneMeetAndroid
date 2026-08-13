@@ -19,6 +19,11 @@ enum class Feature(
         titleRes = R.string.feature_occupancy_simulated_title,
         descriptionRes = R.string.feature_occupancy_simulated_description,
     ),
+    PoiClick(
+        slug = "poi-click",
+        titleRes = R.string.feature_poi_click_title,
+        descriptionRes = R.string.feature_poi_click_description,
+    ),
     ;
 
     companion object {

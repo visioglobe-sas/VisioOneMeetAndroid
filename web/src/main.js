@@ -34,11 +34,28 @@ window.MapBridge = {
   },
 };
 
+// Web -> Native bridge: forwards the SDK's 'poiclick' event to the native side,
+// so a screen can react to the user tapping a POI on the map (see
+// docs/features/poi-click.md). The payload is a JSON-encoded array (usually a
+// single entry) of { id, name }, name being resolved via the venue's
+// Translator for the venue's currentLocale so the native side never has to
+// deal with raw/untranslated POI data.
+function onPoiClick(event) {
+  if (!venue) return;
+  const locale = venue.currentLocale;
+  const pois = event.pois.map((poi) => ({
+    id: poi.id,
+    name: venue.translator.translatePOI(poi, locale).name,
+  }));
+  bridge?.onPoiClick(JSON.stringify(pois));
+}
+
 async function main() {
   try {
     const visioOne = createVisioOne();
     venue = await visioOne.loadVenue({ hash });
     view = await visioOne.createView(container, venue);
+    view.addEventListener('poiclick', onPoiClick);
     bridge?.onMapReady();
   } catch (error) {
     bridge?.onMapError(String(error?.message ?? error));

@@ -6,4 +6,6 @@
     <string name="feature_reset_view_description">Recentre la caméra sur la vue par défaut du lieu.</string>
     <string name="feature_occupancy_simulated_title">Occupation simulée</string>
     <string name="feature_occupancy_simulated_description">Bascule la couleur d\'occupation d\'un lieu avec des données simulées.</string>
+    <string name="feature_poi_click_title">Clic sur un POI</string>
+    <string name="feature_poi_click_description">Touchez un POI sur la carte pour voir ses détails.</string>
 </resources>

@@ -77,6 +77,9 @@ Le "contrat" est l'ensemble des messages que les deux côtés se sont mis d'acco
 | Natif → Web | `?hash=<mapHash>` (query param) | Chaîne de 41 caractères | `VisioOneMapScreen.kt` (`loadUrl`) | `web/src/main.js` (`URLSearchParams`) |
 | Web → Natif | `AndroidBridge.onMapReady()` | Aucun | `web/src/main.js`, après `createView()` réussi | `MapBridge.onMapReady()` dans `VisioOneMapScreen.kt` |
 | Web → Natif | `AndroidBridge.onMapError(message)` | `String` (message d'erreur) | `web/src/main.js`, dans le `catch` de `main()` | `MapBridge.onMapError()` dans `VisioOneMapScreen.kt` |
+| Web → Natif | `AndroidBridge.onPoiClick(payload)` | `String` (JSON : tableau de `{id, name}`) | `web/src/main.js`, listener `view.addEventListener('poiclick', ...)` | `MapBridge.onPoiClick()` dans `FeatureMapScreen.kt` — voir `docs/features/poi-click.md` |
+
+> Note : ce tableau ne couvre que le canal ② (`@JavascriptInterface`). Le canal ③ (`evaluateJavascript`, natif → web) décrit en section 7 comme « non utilisé aujourd'hui » est en réalité déjà utilisé par les features `reset-view` et `occupancy-simulated` (`window.MapBridge.goToGlobal()` / `window.MapBridge.updateOccupancy(...)`, voir `FeatureOverlays.kt` et leurs docs respectives dans `docs/features/`) — ce guide n'a pas été mis à jour à ce moment-là ; à corriger dans une prochaine passe sur ce document.
 
 Toute évolution de la communication (nouvel événement, nouvelle donnée) doit commencer par **ajouter une ligne à ce tableau** avant d'écrire du code — c'est la spécification du pont.
 

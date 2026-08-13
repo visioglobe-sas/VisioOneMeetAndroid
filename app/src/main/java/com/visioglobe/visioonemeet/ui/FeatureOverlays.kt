@@ -1,12 +1,15 @@
 package com.visioglobe.visioonemeet.ui
 
 import android.webkit.WebView
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Button
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -106,6 +109,51 @@ fun OccupancySimulationOverlay(webView: WebView?) {
         } finally {
             // Reset the surface rather than leaving it stuck on the last simulated color.
             view.updateOccupancy(targetPlaceId, null)
+        }
+    }
+}
+
+/** A single POI carried by the `AndroidBridge.onPoiClick` payload. See docs/features/poi-click.md. */
+data class PoiClickInfo(val id: String, val name: String)
+
+/**
+ * Parses the JSON array emitted by `window.MapBridge`'s `poiclick` forwarder in `web/src/main.js`,
+ * e.g. `[{"id":"poi-42","name":"Meeting room A"}]` — one entry per POI under the tap (almost always
+ * a single one). `name` falls back to an empty string when the venue has no translation for it,
+ * never throwing, so a missing translation never crashes the bridge callback.
+ */
+internal fun parsePoiClickPayload(json: String): List<PoiClickInfo> {
+    val array = JSONArray(json)
+    return List(array.length()) { index ->
+        val entry = array.getJSONObject(index)
+        PoiClickInfo(id = entry.getString("id"), name = entry.optString("name", ""))
+    }
+}
+
+/**
+ * Displays the POI(s) tapped on the map, driven entirely by the `poiclick` SDK event relayed
+ * through the native<->JS bridge — there is no manual control here, unlike the other overlays.
+ * [FeatureMapScreen] auto-opens the modal bottom sheet hosting this content as soon as a click
+ * arrives; the FAB remains available too, so re-opening the sheet re-shows the last tapped POI.
+ */
+@Composable
+fun PoiClickOverlay(pois: List<PoiClickInfo>) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp),
+    ) {
+        if (pois.isEmpty()) {
+            Text("Tap a POI on the map to see its details.")
+            return@Column
+        }
+        pois.forEachIndexed { index, poi ->
+            if (index > 0) Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                text = poi.name.ifBlank { poi.id },
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Text(text = "ID: ${poi.id}", style = MaterialTheme.typography.bodyMedium)
         }
     }
 }

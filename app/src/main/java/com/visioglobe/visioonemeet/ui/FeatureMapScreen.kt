@@ -54,6 +54,12 @@ private sealed interface MapLoadState {
  * the floating action button once the map is [MapLoadState.Ready], and handed the live [WebView]
  * so it can drive its own native<->JS bridge calls (see `FeatureOverlays.kt`). [onBack] pops the
  * nav back stack to the Home menu, in addition to the system back button.
+ *
+ * The web bundle always forwards the SDK's `poiclick` event to `AndroidBridge.onPoiClick`
+ * (see `web/src/main.js`), but only a screen that opts in with [reactsToPoiClicks] acts on it:
+ * it auto-opens the modal bottom sheet (same as tapping the FAB) and hands the parsed POIs to
+ * [sheetContent] as its second argument. Other screens simply ignore the event, so tapping a POI
+ * on, say, the reset-view screen has no side effect. See docs/features/poi-click.md.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -61,13 +67,15 @@ fun FeatureMapScreen(
     mapHash: String,
     titleRes: Int?,
     modifier: Modifier = Modifier,
+    reactsToPoiClicks: Boolean = false,
     onBack: () -> Unit,
-    sheetContent: @Composable (webView: WebView?) -> Unit,
+    sheetContent: @Composable (webView: WebView?, lastPoiClick: List<PoiClickInfo>) -> Unit,
 ) {
     var loadState by remember { mutableStateOf<MapLoadState>(MapLoadState.Loading) }
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
     var webView by remember { mutableStateOf<WebView?>(null) }
     var showControls by remember { mutableStateOf(false) }
+    var lastPoiClick by remember { mutableStateOf<List<PoiClickInfo>>(emptyList()) }
     val sheetState = rememberModalBottomSheetState()
 
     Scaffold(
@@ -123,6 +131,14 @@ fun FeatureMapScreen(
                             MapBridge(
                                 onReady = { mainHandler.post { loadState = MapLoadState.Ready } },
                                 onError = { message -> mainHandler.post { loadState = MapLoadState.Error(message) } },
+                                notifyPoiClick = { payload ->
+                                    if (reactsToPoiClicks) {
+                                        mainHandler.post {
+                                            lastPoiClick = parsePoiClickPayload(payload)
+                                            showControls = true
+                                        }
+                                    }
+                                },
                             ),
                             "AndroidBridge",
                         )
@@ -162,7 +178,7 @@ fun FeatureMapScreen(
             sheetState = sheetState,
             containerColor = MaterialTheme.colorScheme.surface,
         ) {
-            sheetContent(webView)
+            sheetContent(webView, lastPoiClick)
         }
     }
 }
@@ -170,10 +186,14 @@ fun FeatureMapScreen(
 private class MapBridge(
     private val onReady: () -> Unit,
     private val onError: (String) -> Unit,
+    private val notifyPoiClick: (String) -> Unit,
 ) {
     @JavascriptInterface
     fun onMapReady() = onReady()
 
     @JavascriptInterface
     fun onMapError(message: String) = onError(message)
+
+    @JavascriptInterface
+    fun onPoiClick(payload: String) = notifyPoiClick(payload)
 }
