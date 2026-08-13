@@ -29,6 +29,11 @@ enum class Feature(
         titleRes = R.string.feature_goto_poi_title,
         descriptionRes = R.string.feature_goto_poi_description,
     ),
+    FloorSelector(
+        slug = "floor-selector",
+        titleRes = R.string.feature_floor_selector_title,
+        descriptionRes = R.string.feature_floor_selector_description,
+    ),
     ;
 
     companion object {

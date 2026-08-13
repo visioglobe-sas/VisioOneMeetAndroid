@@ -60,6 +60,12 @@ private sealed interface MapLoadState {
  * it auto-opens the modal bottom sheet (same as tapping the FAB) and hands the parsed POIs to
  * [sheetContent] as its second argument. Other screens simply ignore the event, so tapping a POI
  * on, say, the reset-view screen has no side effect. See docs/features/poi-click.md.
+ *
+ * The web bundle also always pushes the current building's floors once via
+ * `AndroidBridge.onFloorsReady`, then keeps the active one in sync via
+ * `AndroidBridge.onFloorChanged` (see `web/src/main.js`). Unlike POI clicks, this never
+ * auto-opens the sheet — it is handed to [sheetContent] as its third argument for whichever
+ * screen wants to render it. See docs/features/floor-selector.md.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -69,13 +75,14 @@ fun FeatureMapScreen(
     modifier: Modifier = Modifier,
     reactsToPoiClicks: Boolean = false,
     onBack: () -> Unit,
-    sheetContent: @Composable (webView: WebView?, lastPoiClick: List<PoiClickInfo>) -> Unit,
+    sheetContent: @Composable (webView: WebView?, lastPoiClick: List<PoiClickInfo>, floorSelector: FloorSelectorState) -> Unit,
 ) {
     var loadState by remember { mutableStateOf<MapLoadState>(MapLoadState.Loading) }
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
     var webView by remember { mutableStateOf<WebView?>(null) }
     var showControls by remember { mutableStateOf(false) }
     var lastPoiClick by remember { mutableStateOf<List<PoiClickInfo>>(emptyList()) }
+    var floorSelector by remember { mutableStateOf(FloorSelectorState()) }
     val sheetState = rememberModalBottomSheetState()
 
     Scaffold(
@@ -139,6 +146,12 @@ fun FeatureMapScreen(
                                         }
                                     }
                                 },
+                                notifyFloorsReady = { payload ->
+                                    mainHandler.post { floorSelector = parseFloorsReadyPayload(payload) }
+                                },
+                                notifyFloorChanged = { floorId ->
+                                    mainHandler.post { floorSelector = floorSelector.copy(currentFloorId = floorId) }
+                                },
                             ),
                             "AndroidBridge",
                         )
@@ -178,7 +191,7 @@ fun FeatureMapScreen(
             sheetState = sheetState,
             containerColor = MaterialTheme.colorScheme.surface,
         ) {
-            sheetContent(webView, lastPoiClick)
+            sheetContent(webView, lastPoiClick, floorSelector)
         }
     }
 }
@@ -187,6 +200,8 @@ private class MapBridge(
     private val onReady: () -> Unit,
     private val onError: (String) -> Unit,
     private val notifyPoiClick: (String) -> Unit,
+    private val notifyFloorsReady: (String) -> Unit,
+    private val notifyFloorChanged: (String?) -> Unit,
 ) {
     @JavascriptInterface
     fun onMapReady() = onReady()
@@ -196,4 +211,10 @@ private class MapBridge(
 
     @JavascriptInterface
     fun onPoiClick(payload: String) = notifyPoiClick(payload)
+
+    @JavascriptInterface
+    fun onFloorsReady(payload: String) = notifyFloorsReady(payload)
+
+    @JavascriptInterface
+    fun onFloorChanged(floorId: String?) = notifyFloorChanged(floorId)
 }
