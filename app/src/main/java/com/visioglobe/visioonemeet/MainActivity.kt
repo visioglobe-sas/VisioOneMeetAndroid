@@ -12,6 +12,7 @@ import com.visioglobe.visioonemeet.model.Feature
 import com.visioglobe.visioonemeet.ui.FeatureMapScreen
 import com.visioglobe.visioonemeet.ui.FeatureMenuScreen
 import com.visioglobe.visioonemeet.ui.OccupancySimulationOverlay
+import com.visioglobe.visioonemeet.ui.PoiClickOverlay
 import com.visioglobe.visioonemeet.ui.ResetViewOverlay
 import com.visioglobe.visioonemeet.ui.theme.VisioOneMeetTheme
 
@@ -37,11 +38,13 @@ class MainActivity : ComponentActivity() {
                             mapHash = DEFAULT_MAP_HASH,
                             titleRes = feature?.titleRes,
                             modifier = Modifier.fillMaxSize(),
+                            reactsToPoiClicks = feature == Feature.PoiClick,
                             onBack = { navController.popBackStack() },
-                            sheetContent = { webView ->
+                            sheetContent = { webView, lastPoiClick ->
                                 when (feature) {
                                     Feature.ResetView -> ResetViewOverlay(webView)
                                     Feature.OccupancySimulated -> OccupancySimulationOverlay(webView)
+                                    Feature.PoiClick -> PoiClickOverlay(lastPoiClick)
                                     null -> Unit
                                 }
                             },
