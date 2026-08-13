@@ -11,15 +11,17 @@ import android.webkit.WebViewClient
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.BottomSheetDefaults
-import androidx.compose.material3.BottomSheetScaffold
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -36,7 +38,6 @@ import androidx.webkit.WebViewAssetLoader
 import com.visioglobe.visioonemeet.R
 
 private const val ASSET_LOADER_DOMAIN = "appassets.androidx.local"
-private val SHEET_PEEK_HEIGHT = 96.dp
 
 private sealed interface MapLoadState {
     data object Loading : MapLoadState
@@ -49,10 +50,10 @@ private sealed interface MapLoadState {
  * served from the app's assets through [WebViewAssetLoader], which exposes it on a synthetic
  * https:// origin instead of file:// so ES module imports resolve without CORS issues.
  *
- * The feature control lives in [sheetContent], rendered inside a [BottomSheetScaffold]'s sheet
- * once the map is [MapLoadState.Ready], and handed the live [WebView] so it can drive its own
- * native<->JS bridge calls (see `FeatureOverlays.kt`). [onBack] pops the nav back stack to the
- * Home menu, in addition to the system back button.
+ * The feature control lives in [sheetContent], rendered inside a [ModalBottomSheet] opened via
+ * the floating action button once the map is [MapLoadState.Ready], and handed the live [WebView]
+ * so it can drive its own native<->JS bridge calls (see `FeatureOverlays.kt`). [onBack] pops the
+ * nav back stack to the Home menu, in addition to the system back button.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -65,8 +66,10 @@ fun FeatureMapScreen(
     var loadState by remember { mutableStateOf<MapLoadState>(MapLoadState.Loading) }
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
     var webView by remember { mutableStateOf<WebView?>(null) }
+    var showControls by remember { mutableStateOf(false) }
+    val sheetState = rememberModalBottomSheetState()
 
-    BottomSheetScaffold(
+    Scaffold(
         modifier = modifier,
         topBar = {
             TopAppBar(
@@ -81,12 +84,14 @@ fun FeatureMapScreen(
                 },
             )
         },
-        sheetPeekHeight = SHEET_PEEK_HEIGHT,
-        sheetContainerColor = MaterialTheme.colorScheme.surface,
-        sheetDragHandle = { BottomSheetDefaults.DragHandle() },
-        sheetContent = {
+        floatingActionButton = {
             if (loadState is MapLoadState.Ready) {
-                sheetContent(webView)
+                FloatingActionButton(onClick = { showControls = true }) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_tune),
+                        contentDescription = stringResource(R.string.open_controls_content_description),
+                    )
+                }
             }
         },
     ) { innerPadding ->
@@ -147,6 +152,16 @@ fun FeatureMapScreen(
 
                 is MapLoadState.Ready -> Unit
             }
+        }
+    }
+
+    if (showControls) {
+        ModalBottomSheet(
+            onDismissRequest = { showControls = false },
+            sheetState = sheetState,
+            containerColor = MaterialTheme.colorScheme.surface,
+        ) {
+            sheetContent(webView)
         }
     }
 }
