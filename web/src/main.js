@@ -12,12 +12,16 @@ const container = document.querySelector('#content');
 const bridge = window.AndroidBridge;
 
 let venue = null;
+let view = null;
 
 // Native -> JS bridge: one method per command, called from Kotlin via
 // WebView.evaluateJavascript(). Kotlin JSON-encodes arguments before
 // interpolating them into the generated script call, so what arrives here
 // is already a real JS value (array/object), never a string to re-parse.
 window.MapBridge = {
+  goToGlobal() {
+    if (view) view.goToGlobal();
+  },
   updateOccupancy(occupancy) {
     if (!venue) return;
     occupancy.forEach((entry) => {
@@ -34,7 +38,7 @@ async function main() {
   try {
     const visioOne = createVisioOne();
     venue = await visioOne.loadVenue({ hash });
-    await visioOne.createView(container, venue);
+    view = await visioOne.createView(container, venue);
     bridge?.onMapReady();
   } catch (error) {
     bridge?.onMapError(String(error?.message ?? error));

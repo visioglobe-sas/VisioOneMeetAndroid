@@ -69,6 +69,14 @@ private fun WebView.updateOccupancy(planId: String, color: String?) {
 }
 
 /**
+ * Recenters the camera on the whole venue by calling `view.goToGlobal()` in the WebView. See
+ * docs/features/reset-view.md.
+ */
+private fun WebView.goToGlobal() {
+    evaluateJavascript("window.MapBridge.goToGlobal()", null)
+}
+
+/**
  * Hosts the VisioOne JS SDK inside a WebView. The SDK is bundled with Vite (see /web) and
  * served from the app's assets through [WebViewAssetLoader], which exposes it on a synthetic
  * https:// origin instead of file:// so ES module imports resolve without CORS issues.
@@ -132,7 +140,15 @@ fun VisioOneMapScreen(mapHash: String, modifier: Modifier = Modifier) {
                 color = MaterialTheme.colorScheme.error,
             )
 
-            is MapLoadState.Ready ->
+            is MapLoadState.Ready -> {
+                Button(
+                    onClick = { webView?.goToGlobal() },
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(12.dp),
+                ) {
+                    Text("Reset view")
+                }
                 OccupancySimulationPanel(
                     placeId = placeId,
                     onPlaceIdChange = { placeId = it },
@@ -140,6 +156,7 @@ fun VisioOneMapScreen(mapHash: String, modifier: Modifier = Modifier) {
                     onToggle = { simulatingOccupancy = !simulatingOccupancy },
                     modifier = Modifier.align(Alignment.BottomCenter),
                 )
+            }
         }
 
         LaunchedEffect(simulatingOccupancy, placeId, webView) {
