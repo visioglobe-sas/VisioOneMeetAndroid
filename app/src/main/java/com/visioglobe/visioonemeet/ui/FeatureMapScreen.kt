@@ -9,12 +9,17 @@ import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.BottomSheetDefaults
+import androidx.compose.material3.BottomSheetScaffold
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -22,12 +27,16 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.webkit.WebViewAssetLoader
+import com.visioglobe.visioonemeet.R
 
 private const val ASSET_LOADER_DOMAIN = "appassets.androidx.local"
+private val SHEET_PEEK_HEIGHT = 96.dp
 
 private sealed interface MapLoadState {
     data object Loading : MapLoadState
@@ -40,71 +49,104 @@ private sealed interface MapLoadState {
  * served from the app's assets through [WebViewAssetLoader], which exposes it on a synthetic
  * https:// origin instead of file:// so ES module imports resolve without CORS issues.
  *
- * [overlay] renders once the map is [MapLoadState.Ready], and is handed the live [WebView] so it
- * can drive its own native<->JS bridge calls (see `FeatureOverlays.kt`).
+ * The feature control lives in [sheetContent], rendered inside a [BottomSheetScaffold]'s sheet
+ * once the map is [MapLoadState.Ready], and handed the live [WebView] so it can drive its own
+ * native<->JS bridge calls (see `FeatureOverlays.kt`). [onBack] pops the nav back stack to the
+ * Home menu, in addition to the system back button.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FeatureMapScreen(
     mapHash: String,
     modifier: Modifier = Modifier,
-    overlay: @Composable BoxScope.(webView: WebView?) -> Unit,
+    onBack: () -> Unit,
+    sheetContent: @Composable (webView: WebView?) -> Unit,
 ) {
     var loadState by remember { mutableStateOf<MapLoadState>(MapLoadState.Loading) }
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
     var webView by remember { mutableStateOf<WebView?>(null) }
 
-    Box(modifier = modifier.fillMaxSize()) {
-        AndroidView(
-            modifier = Modifier.fillMaxSize(),
-            factory = { context ->
-                val assetLoader = WebViewAssetLoader.Builder()
-                    .setDomain(ASSET_LOADER_DOMAIN)
-                    .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(context))
-                    .build()
-
-                WebView(context).apply {
-                    layoutParams = ViewGroup.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                    )
-
-                    settings.javaScriptEnabled = true
-                    settings.domStorageEnabled = true
-                    settings.mediaPlaybackRequiresUserGesture = false
-
-                    addJavascriptInterface(
-                        MapBridge(
-                            onReady = { mainHandler.post { loadState = MapLoadState.Ready } },
-                            onError = { message -> mainHandler.post { loadState = MapLoadState.Error(message) } },
-                        ),
-                        "AndroidBridge",
-                    )
-
-                    webViewClient = object : WebViewClient() {
-                        override fun shouldInterceptRequest(
-                            view: WebView,
-                            request: WebResourceRequest,
-                        ): WebResourceResponse? = assetLoader.shouldInterceptRequest(request.url)
+    BottomSheetScaffold(
+        modifier = modifier,
+        topBar = {
+            TopAppBar(
+                title = {},
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_arrow_back),
+                            contentDescription = stringResource(R.string.back_to_menu_content_description),
+                        )
                     }
+                },
+            )
+        },
+        sheetPeekHeight = SHEET_PEEK_HEIGHT,
+        sheetContainerColor = MaterialTheme.colorScheme.surface,
+        sheetDragHandle = { BottomSheetDefaults.DragHandle() },
+        sheetContent = {
+            if (loadState is MapLoadState.Ready) {
+                sheetContent(webView)
+            }
+        },
+    ) { innerPadding ->
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding),
+        ) {
+            AndroidView(
+                modifier = Modifier.fillMaxSize(),
+                factory = { context ->
+                    val assetLoader = WebViewAssetLoader.Builder()
+                        .setDomain(ASSET_LOADER_DOMAIN)
+                        .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(context))
+                        .build()
 
-                    loadUrl("https://$ASSET_LOADER_DOMAIN/assets/www/index.html?hash=$mapHash")
-                }.also { webView = it }
-            },
-        )
+                    WebView(context).apply {
+                        layoutParams = ViewGroup.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                        )
 
-        when (val state = loadState) {
-            is MapLoadState.Loading -> CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+                        settings.javaScriptEnabled = true
+                        settings.domStorageEnabled = true
+                        settings.mediaPlaybackRequiresUserGesture = false
 
-            is MapLoadState.Error -> Text(
-                text = "Impossible de charger la carte VisioOne :\n${state.message}",
-                modifier = Modifier
-                    .align(Alignment.Center)
-                    .padding(24.dp),
-                textAlign = TextAlign.Center,
-                color = MaterialTheme.colorScheme.error,
+                        addJavascriptInterface(
+                            MapBridge(
+                                onReady = { mainHandler.post { loadState = MapLoadState.Ready } },
+                                onError = { message -> mainHandler.post { loadState = MapLoadState.Error(message) } },
+                            ),
+                            "AndroidBridge",
+                        )
+
+                        webViewClient = object : WebViewClient() {
+                            override fun shouldInterceptRequest(
+                                view: WebView,
+                                request: WebResourceRequest,
+                            ): WebResourceResponse? = assetLoader.shouldInterceptRequest(request.url)
+                        }
+
+                        loadUrl("https://$ASSET_LOADER_DOMAIN/assets/www/index.html?hash=$mapHash")
+                    }.also { webView = it }
+                },
             )
 
-            is MapLoadState.Ready -> overlay(webView)
+            when (val state = loadState) {
+                is MapLoadState.Loading -> CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+
+                is MapLoadState.Error -> Text(
+                    text = "Impossible de charger la carte VisioOne :\n${state.message}",
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .padding(24.dp),
+                    textAlign = TextAlign.Center,
+                    color = MaterialTheme.colorScheme.error,
+                )
+
+                is MapLoadState.Ready -> Unit
+            }
         }
     }
 }

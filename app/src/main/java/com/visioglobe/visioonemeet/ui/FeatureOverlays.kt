@@ -1,7 +1,6 @@
 package com.visioglobe.visioonemeet.ui
 
 import android.webkit.WebView
-import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -16,7 +15,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -57,27 +55,24 @@ private fun WebView.goToGlobal() {
 }
 
 @Composable
-fun BoxScope.ResetViewOverlay(webView: WebView?) {
+fun ResetViewOverlay(webView: WebView?) {
     Button(
         onClick = { webView?.goToGlobal() },
-        modifier = Modifier
-            .align(Alignment.TopEnd)
-            .padding(12.dp),
+        modifier = Modifier.padding(16.dp),
     ) {
         Text(stringResource(R.string.feature_reset_view_title))
     }
 }
 
 @Composable
-fun BoxScope.OccupancySimulationOverlay(webView: WebView?) {
+fun OccupancySimulationOverlay(webView: WebView?) {
     var placeId by remember { mutableStateOf("") }
     var simulatingOccupancy by remember { mutableStateOf(false) }
 
     Row(
         modifier = Modifier
-            .align(Alignment.BottomCenter)
             .fillMaxWidth()
-            .padding(12.dp),
+            .padding(16.dp),
     ) {
         OutlinedTextField(
             value = placeId,

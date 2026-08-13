@@ -36,21 +36,19 @@ Contrairement à `updateOccupancy`, cette commande ne prend aucun argument : c'e
        evaluateJavascript("window.MapBridge.goToGlobal()", null)
    }
    ```
-6. **Ajouter le bouton** dans son propre overlay, aligné en haut à droite pour ne pas empiéter sur le panneau de simulation d'occupation (aligné en bas) :
+6. **Ajouter le bouton** comme contenu de la bottom sheet du feature (pas d'alignement flottant : il vit dans `BottomSheetScaffold`, pas sur la carte) :
    ```kotlin
    @Composable
-   fun BoxScope.ResetViewOverlay(webView: WebView?) {
+   fun ResetViewOverlay(webView: WebView?) {
        Button(
            onClick = { webView?.goToGlobal() },
-           modifier = Modifier
-               .align(Alignment.TopEnd)
-               .padding(12.dp),
+           modifier = Modifier.padding(16.dp),
        ) {
            Text(stringResource(R.string.feature_reset_view_title))
        }
    }
    ```
-   `FeatureMapScreen.kt` (le composable partagé qui héberge la WebView) invoque cet overlay via son paramètre `overlay`, une fois la carte à l'état `MapLoadState.Ready` — le câblage par route/slug se fait dans `MainActivity.kt`.
+   `FeatureMapScreen.kt` (le composable partagé qui héberge la WebView) invoque ce contenu via son paramètre `sheetContent`, une fois la carte à l'état `MapLoadState.Ready` — le câblage par route/slug se fait dans `MainActivity.kt`.
 
 ## Points d'attention
 

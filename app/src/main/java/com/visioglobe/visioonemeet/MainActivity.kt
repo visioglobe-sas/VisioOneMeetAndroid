@@ -36,7 +36,8 @@ class MainActivity : ComponentActivity() {
                         FeatureMapScreen(
                             mapHash = DEFAULT_MAP_HASH,
                             modifier = Modifier.fillMaxSize(),
-                            overlay = { webView ->
+                            onBack = { navController.popBackStack() },
+                            sheetContent = { webView ->
                                 when (feature) {
                                     Feature.ResetView -> ResetViewOverlay(webView)
                                     Feature.OccupancySimulated -> OccupancySimulationOverlay(webView)
