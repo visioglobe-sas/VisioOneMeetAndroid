@@ -14,6 +14,10 @@ const bridge = window.AndroidBridge;
 let venue = null;
 let view = null;
 
+// The POI last centered on via `goToPlace`, so `clearPlace` knows which
+// surfaces to un-highlight. See docs/features/goto-poi.md.
+let selectedPoi = null;
+
 // Native -> JS bridge: one method per command, called from Kotlin via
 // WebView.evaluateJavascript(). Kotlin JSON-encodes arguments before
 // interpolating them into the generated script call, so what arrives here
@@ -31,6 +35,35 @@ window.MapBridge = {
         venue.updateSurface(surface, { color: entry.color });
       });
     });
+  },
+  // Centers/zooms the camera on the POI matching `placeId`, and highlights its
+  // surfaces so the result is visible even once the animation settles. A
+  // missing placeId (typo, wrong venue) is a silent no-op — mirrors the other
+  // MapBridge commands (see updateOccupancy above), no error channel back to
+  // native for this today.
+  goToPlace(placeId) {
+    if (!venue || !view) return;
+    const poi = venue.pois.find((p) => p.id === placeId);
+    if (!poi) return;
+
+    selectedPoi = poi;
+    view.goToPOI(poi, {
+      orientation: { pitch: 20 },
+      padding: { top: 100, right: 100, bottom: 100, left: 100 },
+    });
+    poi.surfaces.forEach((surface) => {
+      venue.updateSurface(surface, { selectionColor: view.surfaceSelectionColor });
+    });
+  },
+  // Reverts the highlight applied by goToPlace. Does not move the camera back
+  // — "Clear" only undoes the visual marker, matching the RN sibling's
+  // clearPlace (see docs/features/goto-poi.md, "Points d'attention").
+  clearPlace() {
+    if (!venue || !selectedPoi) return;
+    selectedPoi.surfaces.forEach((surface) => {
+      venue.updateSurface(surface, { selectionColor: 'default' });
+    });
+    selectedPoi = null;
   },
 };
 

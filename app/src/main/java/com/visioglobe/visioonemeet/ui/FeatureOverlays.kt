@@ -57,6 +57,26 @@ private fun WebView.goToGlobal() {
     evaluateJavascript("window.MapBridge.goToGlobal()", null)
 }
 
+/**
+ * Centers/zooms the camera on the POI matching `placeId` by calling `window.MapBridge.goToPlace`
+ * in the WebView (`view.goToPOI` under the hood). See docs/features/goto-poi.md.
+ */
+private fun WebView.goToPlace(placeId: String) {
+    // JSONObject.quote() JSON-encodes the single string argument (quoting + escaping) —
+    // JSONArray().put(placeId) would wrap it in `[...]`, which is wrong here since
+    // MapBridge.goToPlace takes a bare placeId string, not an array (unlike updateOccupancy).
+    val script = "window.MapBridge.goToPlace(${JSONObject.quote(placeId)})"
+    evaluateJavascript(script, null)
+}
+
+/**
+ * Reverts the highlight applied by [goToPlace], without moving the camera back. See
+ * docs/features/goto-poi.md.
+ */
+private fun WebView.clearPlace() {
+    evaluateJavascript("window.MapBridge.clearPlace()", null)
+}
+
 @Composable
 fun ResetViewOverlay(webView: WebView?) {
     Button(
@@ -109,6 +129,41 @@ fun OccupancySimulationOverlay(webView: WebView?) {
         } finally {
             // Reset the surface rather than leaving it stuck on the last simulated color.
             view.updateOccupancy(targetPlaceId, null)
+        }
+    }
+}
+
+/**
+ * FAB-triggered control for `goto-poi`: a Place ID field plus "Go" (centers the camera on that
+ * POI via [WebView.goToPlace]) and "Clear" (undoes the highlight via [WebView.clearPlace], camera
+ * stays put) — same UX as the React Native sibling's `GoToPoiOverlay`. See docs/features/goto-poi.md.
+ */
+@Composable
+fun GoToPoiOverlay(webView: WebView?) {
+    var placeId by remember { mutableStateOf("") }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp),
+    ) {
+        OutlinedTextField(
+            value = placeId,
+            onValueChange = { placeId = it },
+            label = { Text("Place ID") },
+            singleLine = true,
+            modifier = Modifier.weight(1f),
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Button(
+            onClick = { webView?.goToPlace(placeId.trim()) },
+            enabled = placeId.isNotBlank(),
+        ) {
+            Text("Go")
+        }
+        Spacer(modifier = Modifier.width(8.dp))
+        Button(onClick = { webView?.clearPlace() }) {
+            Text("Clear")
         }
     }
 }

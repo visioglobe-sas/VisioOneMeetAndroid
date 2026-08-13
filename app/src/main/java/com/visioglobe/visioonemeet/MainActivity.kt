@@ -11,6 +11,7 @@ import androidx.navigation.compose.rememberNavController
 import com.visioglobe.visioonemeet.model.Feature
 import com.visioglobe.visioonemeet.ui.FeatureMapScreen
 import com.visioglobe.visioonemeet.ui.FeatureMenuScreen
+import com.visioglobe.visioonemeet.ui.GoToPoiOverlay
 import com.visioglobe.visioonemeet.ui.OccupancySimulationOverlay
 import com.visioglobe.visioonemeet.ui.PoiClickOverlay
 import com.visioglobe.visioonemeet.ui.ResetViewOverlay
@@ -45,6 +46,7 @@ class MainActivity : ComponentActivity() {
                                     Feature.ResetView -> ResetViewOverlay(webView)
                                     Feature.OccupancySimulated -> OccupancySimulationOverlay(webView)
                                     Feature.PoiClick -> PoiClickOverlay(lastPoiClick)
+                                    Feature.GoToPoi -> GoToPoiOverlay(webView)
                                     null -> Unit
                                 }
                             },
