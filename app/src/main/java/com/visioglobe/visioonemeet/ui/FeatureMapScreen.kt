@@ -59,6 +59,7 @@ private sealed interface MapLoadState {
 @Composable
 fun FeatureMapScreen(
     mapHash: String,
+    titleRes: Int?,
     modifier: Modifier = Modifier,
     onBack: () -> Unit,
     sheetContent: @Composable (webView: WebView?) -> Unit,
@@ -73,7 +74,7 @@ fun FeatureMapScreen(
         modifier = modifier,
         topBar = {
             TopAppBar(
-                title = {},
+                title = { titleRes?.let { Text(stringResource(it)) } },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(

@@ -35,6 +35,7 @@ class MainActivity : ComponentActivity() {
                         val feature = Feature.fromSlug(backStackEntry.arguments?.getString("slug"))
                         FeatureMapScreen(
                             mapHash = DEFAULT_MAP_HASH,
+                            titleRes = feature?.titleRes,
                             modifier = Modifier.fillMaxSize(),
                             onBack = { navController.popBackStack() },
                             sheetContent = { webView ->
