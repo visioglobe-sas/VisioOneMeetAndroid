@@ -30,26 +30,25 @@ Contrairement à `updateOccupancy`, cette commande ne prend aucun argument : c'e
    view = await visioOne.createView(container, venue); // plus de `await visioOne.createView(...)` seul
    ```
 4. **Reconstruire le bundle web** — `cd web && npm run build`. Gradle ne le fait pas automatiquement (voir `GUIDE_INTEGRATEUR.md`) : sans ce rebuild, `app/src/main/assets/www/` contient encore l'ancien JS et le bouton natif appelle une commande qui n'existe pas côté JS.
-5. **Ajouter l'extension Kotlin** dans `VisioOneMapScreen.kt`, à côté de `WebView.updateOccupancy` :
+5. **Ajouter l'extension Kotlin** dans `FeatureOverlays.kt`, à côté de `WebView.updateOccupancy` :
    ```kotlin
    private fun WebView.goToGlobal() {
        evaluateJavascript("window.MapBridge.goToGlobal()", null)
    }
    ```
-6. **Ajouter le bouton** dans la branche `is MapLoadState.Ready ->`, aligné en haut à droite pour ne pas empiéter sur le panneau de simulation d'occupation (aligné en bas) :
+6. **Ajouter le bouton** comme contenu de la bottom sheet du feature (pas d'alignement flottant : il vit dans `BottomSheetScaffold`, pas sur la carte) :
    ```kotlin
-   is MapLoadState.Ready -> {
+   @Composable
+   fun ResetViewOverlay(webView: WebView?) {
        Button(
            onClick = { webView?.goToGlobal() },
-           modifier = Modifier
-               .align(Alignment.TopEnd)
-               .padding(12.dp),
+           modifier = Modifier.padding(16.dp),
        ) {
-           Text("Reset view")
+           Text(stringResource(R.string.feature_reset_view_title))
        }
-       OccupancySimulationPanel(/* ... */)
    }
    ```
+   `FeatureMapScreen.kt` (le composable partagé qui héberge la WebView) invoque ce contenu via son paramètre `sheetContent`, une fois la carte à l'état `MapLoadState.Ready` — le câblage par route/slug se fait dans `MainActivity.kt`.
 
 ## Points d'attention
 

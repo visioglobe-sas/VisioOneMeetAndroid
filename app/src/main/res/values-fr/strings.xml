@@ -1,0 +1,9 @@
+<resources>
+    <string name="app_title_by_visioglobe">%1$s by VisioGlobe</string>
+    <string name="back_to_menu_content_description">Retour au menu</string>
+    <string name="open_controls_content_description">Ouvrir les contrôles de la fonctionnalité</string>
+    <string name="feature_reset_view_title">Réinitialiser la vue</string>
+    <string name="feature_reset_view_description">Recentre la caméra sur la vue par défaut du lieu.</string>
+    <string name="feature_occupancy_simulated_title">Occupation simulée</string>
+    <string name="feature_occupancy_simulated_description">Bascule la couleur d\'occupation d\'un lieu avec des données simulées.</string>
+</resources>

@@ -1,3 +1,10 @@
 <resources>
     <string name="app_name">VisioOne Meet</string>
+    <string name="app_title_by_visioglobe">%1$s by VisioGlobe</string>
+    <string name="back_to_menu_content_description">Back to menu</string>
+    <string name="open_controls_content_description">Open feature controls</string>
+    <string name="feature_reset_view_title">Reset view</string>
+    <string name="feature_reset_view_description">Return the camera to the venue\'s default view.</string>
+    <string name="feature_occupancy_simulated_title">Simulated occupancy</string>
+    <string name="feature_occupancy_simulated_description">Toggle a place\'s occupancy color with simulated data.</string>
 </resources>
