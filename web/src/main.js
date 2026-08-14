@@ -18,6 +18,10 @@ let view = null;
 // surfaces to un-highlight. See docs/features/goto-poi.md.
 let selectedPoi = null;
 
+// The trace last drawn by `computeNavigation`, so `clearNavigation` knows
+// what to remove. See docs/features/compute-navigation.md.
+let currentNavigationTrace = null;
+
 // Native -> JS bridge: one method per command, called from Kotlin via
 // WebView.evaluateJavascript(). Kotlin JSON-encodes arguments before
 // interpolating them into the generated script call, so what arrives here
@@ -77,6 +81,49 @@ window.MapBridge = {
     const floor = building.floors.find((f) => f.id === floorId);
     if (!floor) return;
     view.goToFloor(floor);
+  },
+  // Computes a route between two POIs (given by id — `computeNavigation`
+  // accepts a POI, a POI id string, or a Position, see the SDK's
+  // NavigationRequest.d.ts; ids are used here since that's all the bottom
+  // sheet's text fields collect) and draws it on the map via a
+  // NavigationTrace, same request shape as the React Native sibling's
+  // `startItinerary` (`visioOneHtml.ts`). Any previous trace is removed
+  // first so consecutive itineraries don't stack. A bad/unreachable id
+  // makes `computeNavigation` throw (see the SDK's
+  // InvalidNavigationRequestError) — caught here and reported back to
+  // native (`onNavigationError`) so the bottom sheet can show *something*
+  // went wrong, unlike the other MapBridge commands (goToPlace, goToFloor)
+  // which fail silently: those look up an id locally and no-op on a miss,
+  // whereas an invalid itinerary request would otherwise leave the user
+  // staring at an unchanged map with no clue why. `onNavigationComputed`
+  // fires on success so native can clear a previously shown error. See
+  // docs/features/compute-navigation.md.
+  computeNavigation(origin, destination, isAccessible) {
+    if (!venue || !view) return;
+    this.clearNavigation();
+    try {
+      const navigation = venue.computeNavigation({
+        origin,
+        destination,
+        isAccessible,
+        type: 'fastest',
+        firstNodeAsIntersection: false,
+        mergeFloorChangeInstructions: false,
+      });
+      currentNavigationTrace = venue.createNavigationTrace(navigation);
+      view.setCurrentNavigationTrace(currentNavigationTrace);
+      bridge?.onNavigationComputed();
+    } catch (error) {
+      bridge?.onNavigationError(String(error?.message ?? error));
+    }
+  },
+  // Removes the trace drawn by computeNavigation, if any — a no-op
+  // otherwise (e.g. called before any itinerary was computed).
+  clearNavigation() {
+    if (!venue || !view || !currentNavigationTrace) return;
+    view.removeCurrentNavigationTrace();
+    venue.removeNavigationTrace(currentNavigationTrace);
+    currentNavigationTrace = null;
   },
 };
 

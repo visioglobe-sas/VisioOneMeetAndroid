@@ -9,6 +9,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.visioglobe.visioonemeet.model.Feature
+import com.visioglobe.visioonemeet.ui.ComputeNavigationOverlay
 import com.visioglobe.visioonemeet.ui.FeatureMapScreen
 import com.visioglobe.visioonemeet.ui.FeatureMenuScreen
 import com.visioglobe.visioonemeet.ui.FloorSelectorOverlay
@@ -42,13 +43,14 @@ class MainActivity : ComponentActivity() {
                             modifier = Modifier.fillMaxSize(),
                             reactsToPoiClicks = feature == Feature.PoiClick,
                             onBack = { navController.popBackStack() },
-                            sheetContent = { webView, lastPoiClick, floorSelector ->
+                            sheetContent = { webView, lastPoiClick, floorSelector, navigationError ->
                                 when (feature) {
                                     Feature.ResetView -> ResetViewOverlay(webView)
                                     Feature.OccupancySimulated -> OccupancySimulationOverlay(webView)
                                     Feature.PoiClick -> PoiClickOverlay(lastPoiClick)
                                     Feature.GoToPoi -> GoToPoiOverlay(webView)
                                     Feature.FloorSelector -> FloorSelectorOverlay(webView, floorSelector)
+                                    Feature.ComputeNavigation -> ComputeNavigationOverlay(webView, navigationError)
                                     null -> Unit
                                 }
                             },

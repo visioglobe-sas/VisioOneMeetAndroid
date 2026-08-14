@@ -66,6 +66,11 @@ private sealed interface MapLoadState {
  * `AndroidBridge.onFloorChanged` (see `web/src/main.js`). Unlike POI clicks, this never
  * auto-opens the sheet — it is handed to [sheetContent] as its third argument for whichever
  * screen wants to render it. See docs/features/floor-selector.md.
+ *
+ * `computeNavigation` failures (bad/unreachable Place IDs) are reported back via
+ * `AndroidBridge.onNavigationError`, surfaced to [sheetContent] as its fourth argument; a
+ * subsequent successful computation clears it via `AndroidBridge.onNavigationComputed`. See
+ * docs/features/compute-navigation.md.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -75,7 +80,12 @@ fun FeatureMapScreen(
     modifier: Modifier = Modifier,
     reactsToPoiClicks: Boolean = false,
     onBack: () -> Unit,
-    sheetContent: @Composable (webView: WebView?, lastPoiClick: List<PoiClickInfo>, floorSelector: FloorSelectorState) -> Unit,
+    sheetContent: @Composable (
+        webView: WebView?,
+        lastPoiClick: List<PoiClickInfo>,
+        floorSelector: FloorSelectorState,
+        navigationError: String?,
+    ) -> Unit,
 ) {
     var loadState by remember { mutableStateOf<MapLoadState>(MapLoadState.Loading) }
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
@@ -83,6 +93,7 @@ fun FeatureMapScreen(
     var showControls by remember { mutableStateOf(false) }
     var lastPoiClick by remember { mutableStateOf<List<PoiClickInfo>>(emptyList()) }
     var floorSelector by remember { mutableStateOf(FloorSelectorState()) }
+    var navigationError by remember { mutableStateOf<String?>(null) }
     val sheetState = rememberModalBottomSheetState()
 
     Scaffold(
@@ -152,6 +163,12 @@ fun FeatureMapScreen(
                                 notifyFloorChanged = { floorId ->
                                     mainHandler.post { floorSelector = floorSelector.copy(currentFloorId = floorId) }
                                 },
+                                notifyNavigationComputed = {
+                                    mainHandler.post { navigationError = null }
+                                },
+                                notifyNavigationError = { message ->
+                                    mainHandler.post { navigationError = message }
+                                },
                             ),
                             "AndroidBridge",
                         )
@@ -191,7 +208,7 @@ fun FeatureMapScreen(
             sheetState = sheetState,
             containerColor = MaterialTheme.colorScheme.surface,
         ) {
-            sheetContent(webView, lastPoiClick, floorSelector)
+            sheetContent(webView, lastPoiClick, floorSelector, navigationError)
         }
     }
 }
@@ -202,6 +219,8 @@ private class MapBridge(
     private val notifyPoiClick: (String) -> Unit,
     private val notifyFloorsReady: (String) -> Unit,
     private val notifyFloorChanged: (String?) -> Unit,
+    private val notifyNavigationComputed: () -> Unit,
+    private val notifyNavigationError: (String) -> Unit,
 ) {
     @JavascriptInterface
     fun onMapReady() = onReady()
@@ -217,4 +236,10 @@ private class MapBridge(
 
     @JavascriptInterface
     fun onFloorChanged(floorId: String?) = notifyFloorChanged(floorId)
+
+    @JavascriptInterface
+    fun onNavigationComputed() = notifyNavigationComputed()
+
+    @JavascriptInterface
+    fun onNavigationError(message: String) = notifyNavigationError(message)
 }

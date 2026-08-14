@@ -34,6 +34,11 @@ enum class Feature(
         titleRes = R.string.feature_floor_selector_title,
         descriptionRes = R.string.feature_floor_selector_description,
     ),
+    ComputeNavigation(
+        slug = "compute-navigation",
+        titleRes = R.string.feature_compute_navigation_title,
+        descriptionRes = R.string.feature_compute_navigation_description,
+    ),
     ;
 
     companion object {
