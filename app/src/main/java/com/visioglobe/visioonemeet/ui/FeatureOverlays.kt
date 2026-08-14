@@ -12,11 +12,13 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -26,6 +28,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.visioglobe.visioonemeet.R
+import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import org.json.JSONArray
@@ -35,6 +38,15 @@ import org.json.JSONObject
 // these colors on a timer. See docs/features/occupancy-simulated.md.
 private val OCCUPANCY_COLORS = listOf("#2ECC71", "#F1C40F", "#E74C3C")
 private const val OCCUPANCY_INTERVAL_MS = 2500L
+
+// `simulated-position`'s interpolation loop: how often a new point is injected, and how much of
+// the origin-destination segment (as a 0..1 fraction) is covered per tick — ~7.5s to walk one way
+// at these values. See docs/features/simulated-position.md.
+private const val SIMULATED_POSITION_INTERVAL_MS = 150L
+private const val SIMULATED_POSITION_STEP = 0.02
+private const val SIMULATED_POSITION_MIN_RADIUS_METERS = 1f
+private const val SIMULATED_POSITION_MAX_RADIUS_METERS = 20f
+private const val SIMULATED_POSITION_DEFAULT_RADIUS_METERS = 5f
 
 /**
  * Calls `window.MapBridge.updateOccupancy` in the WebView. `color: null` resets the surface to
@@ -132,6 +144,64 @@ private val UI_PART_TOGGLES = listOf(
     "search" to R.string.ui_part_search_label,
     "userTracking" to R.string.ui_part_user_tracking_label,
 )
+
+/**
+ * Resolves the WGS84 position of [originId]/[destinationId] in one round trip by calling
+ * `window.MapBridge.resolvePositions` in the WebView. The result arrives asynchronously via
+ * `AndroidBridge.onPositionsResolved`, echoing [requestId] back so the caller can match the
+ * response to this particular call. See docs/features/simulated-position.md.
+ */
+private fun WebView.resolvePositions(requestId: Int, originId: String, destinationId: String) {
+    val script = "window.MapBridge.resolvePositions(" +
+        "$requestId, ${JSONObject.quote(originId)}, ${JSONObject.quote(destinationId)})"
+    evaluateJavascript(script, null)
+}
+
+/**
+ * Injects/updates the simulated tracked position and its accuracy circle by calling
+ * `window.MapBridge.injectTrackedPosition` in the WebView (`view.injectTrackedPosition` under the
+ * hood, after setting `view.allowTracking = true`). [precisionCircleRadiusMeters] is the accuracy
+ * circle's radius, in meters. See docs/features/simulated-position.md.
+ */
+private fun WebView.injectTrackedPosition(latitude: Double, longitude: Double, precisionCircleRadiusMeters: Double) {
+    val script = "window.MapBridge.injectTrackedPosition($latitude, $longitude, $precisionCircleRadiusMeters)"
+    evaluateJavascript(script, null)
+}
+
+/**
+ * Removes the marker/circle injected by [injectTrackedPosition] by calling
+ * `window.MapBridge.stopTrackedPosition` in the WebView (`view.allowTracking = false` under the
+ * hood — there is no dedicated stop method on the SDK). See docs/features/simulated-position.md.
+ */
+private fun WebView.stopTrackedPosition() {
+    evaluateJavascript("window.MapBridge.stopTrackedPosition()", null)
+}
+
+/** A WGS84 position resolved for a POI, as reported by `AndroidBridge.onPositionsResolved`. */
+data class ResolvedPosition(val latitude: Double, val longitude: Double)
+
+/**
+ * Result of a [WebView.resolvePositions] call: [requestId] echoes the value passed to that call
+ * so a stale response (e.g. a Start press superseded by another one) can be told apart from the
+ * current one; [origin]/[destination] are `null` when the corresponding POI id didn't resolve to
+ * a position ("POI not found" case). See docs/features/simulated-position.md.
+ */
+data class ResolvedPositionsPair(
+    val requestId: Int,
+    val origin: ResolvedPosition?,
+    val destination: ResolvedPosition?,
+)
+
+/**
+ * Parses one of the two JSON arguments of `AndroidBridge.onPositionsResolved`, e.g.
+ * `{"latitude":48.858,"longitude":2.294}` or the literal string `"null"` (`JSON.stringify(null)`
+ * on the JS side) when the POI id didn't resolve to a position.
+ */
+internal fun parseResolvedPosition(json: String): ResolvedPosition? {
+    if (json == "null") return null
+    val root = JSONObject(json)
+    return ResolvedPosition(latitude = root.getDouble("latitude"), longitude = root.getDouble("longitude"))
+}
 
 /** A single floor of the exposed building, carried by the `AndroidBridge.onFloorsReady` payload. See docs/features/floor-selector.md. */
 data class FloorInfo(val id: String, val name: String, val levelIndex: Int)
@@ -449,6 +519,137 @@ fun UiPartVisibilityOverlay(webView: WebView?) {
                     },
                 )
             }
+        }
+    }
+}
+
+/**
+ * FAB-triggered control for `simulated-position`: Origin/Destination POI ID fields, a radius
+ * `Slider` (1-20m, [SIMULATED_POSITION_DEFAULT_RADIUS_METERS] by default) and a Start/Stop toggle
+ * button — same toggle pattern as [OccupancySimulationOverlay]. Pressing Start resolves both POI
+ * ids in one round trip via [WebView.resolvePositions]; a `null` slot in the response ("POI not
+ * found") surfaces [errorMessage] below the fields instead of starting anything, same error-
+ * surfacing convention as [ComputeNavigationOverlay]. Once both positions resolve, a
+ * [LaunchedEffect] repeatedly calls [WebView.injectTrackedPosition] with a point linearly
+ * interpolated between origin and destination, ping-ponging back and forth — reading [radiusMeters]
+ * fresh on every tick, so moving the slider while running changes the radius on the *next* tick
+ * with no restart needed. Stop (or leaving the screen, which cancels this effect and tears down
+ * the WebView) calls [WebView.stopTrackedPosition] via the effect's `finally` block, same
+ * cleanup-on-cancellation idiom as [OccupancySimulationOverlay]. See
+ * docs/features/simulated-position.md.
+ */
+@Composable
+fun SimulatedPositionOverlay(webView: WebView?, positionsResolved: ResolvedPositionsPair?) {
+    var originId by remember { mutableStateOf("") }
+    var destinationId by remember { mutableStateOf("") }
+    var radiusMeters by remember { mutableFloatStateOf(SIMULATED_POSITION_DEFAULT_RADIUS_METERS) }
+    var isRunning by remember { mutableStateOf(false) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+    var activePositions by remember { mutableStateOf<Pair<ResolvedPosition, ResolvedPosition>?>(null) }
+    var pendingRequestId by remember { mutableStateOf<Int?>(null) }
+    var nextRequestId by remember { mutableStateOf(0) }
+
+    // Reacts to the response of the resolvePositions() call fired by the Start button below.
+    // `requestId` guards against a stale response from a superseded request overwriting the
+    // outcome of a more recent one (both are near-instant in practice, but this costs nothing).
+    LaunchedEffect(positionsResolved) {
+        val result = positionsResolved ?: return@LaunchedEffect
+        if (result.requestId != pendingRequestId) return@LaunchedEffect
+        pendingRequestId = null
+        val origin = result.origin
+        val destination = result.destination
+        if (origin == null || destination == null) {
+            errorMessage = "POI not found"
+            isRunning = false
+        } else {
+            errorMessage = null
+            activePositions = origin to destination
+            isRunning = true
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp),
+    ) {
+        Row(modifier = Modifier.fillMaxWidth()) {
+            OutlinedTextField(
+                value = originId,
+                onValueChange = { originId = it },
+                label = { Text("Origin POI ID") },
+                singleLine = true,
+                enabled = !isRunning,
+                modifier = Modifier.weight(1f),
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            OutlinedTextField(
+                value = destinationId,
+                onValueChange = { destinationId = it },
+                label = { Text("Destination POI ID") },
+                singleLine = true,
+                enabled = !isRunning,
+                modifier = Modifier.weight(1f),
+            )
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        Text("Accuracy radius: ${radiusMeters.roundToInt()} m")
+        Slider(
+            value = radiusMeters,
+            onValueChange = { radiusMeters = it },
+            valueRange = SIMULATED_POSITION_MIN_RADIUS_METERS..SIMULATED_POSITION_MAX_RADIUS_METERS,
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Button(
+            onClick = {
+                if (isRunning) {
+                    isRunning = false
+                    activePositions = null
+                    pendingRequestId = null
+                } else {
+                    errorMessage = null
+                    val requestId = nextRequestId++
+                    pendingRequestId = requestId
+                    webView?.resolvePositions(requestId, originId.trim(), destinationId.trim())
+                }
+            },
+            enabled = isRunning || (originId.isNotBlank() && destinationId.isNotBlank()),
+        ) {
+            Text(if (isRunning) "Stop simulated position" else "Start simulated position")
+        }
+        if (errorMessage != null) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(text = errorMessage.orEmpty(), color = MaterialTheme.colorScheme.error)
+        }
+    }
+
+    LaunchedEffect(isRunning, activePositions, webView) {
+        val (origin, destination) = activePositions ?: return@LaunchedEffect
+        val view = webView ?: return@LaunchedEffect
+        if (!isRunning) return@LaunchedEffect
+
+        var fraction = 0.0
+        var direction = 1.0
+        try {
+            while (isActive) {
+                val latitude = origin.latitude + (destination.latitude - origin.latitude) * fraction
+                val longitude = origin.longitude + (destination.longitude - origin.longitude) * fraction
+                view.injectTrackedPosition(latitude, longitude, radiusMeters.toDouble())
+                delay(SIMULATED_POSITION_INTERVAL_MS)
+                fraction += direction * SIMULATED_POSITION_STEP
+                when {
+                    fraction >= 1.0 -> {
+                        fraction = 1.0
+                        direction = -1.0
+                    }
+                    fraction <= 0.0 -> {
+                        fraction = 0.0
+                        direction = 1.0
+                    }
+                }
+            }
+        } finally {
+            view.stopTrackedPosition()
         }
     }
 }

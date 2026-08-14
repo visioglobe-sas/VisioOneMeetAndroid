@@ -21,4 +21,6 @@
     <string name="ui_part_poi_details_label">Détails du POI</string>
     <string name="ui_part_search_label">Recherche</string>
     <string name="ui_part_user_tracking_label">Suivi de position</string>
+    <string name="feature_simulated_position_title">Position simulée</string>
+    <string name="feature_simulated_position_description">Anime une position simulée avec un cercle de précision entre deux POI.</string>
 </resources>

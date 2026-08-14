@@ -135,6 +135,44 @@ window.MapBridge = {
     if (!view) return;
     view.setUIPartVisible(uiPart, isVisible);
   },
+  // Resolves the WGS84 position of two POIs by id in one round trip, and
+  // reports both back to native via AndroidBridge.onPositionsResolved.
+  // POIs carry no direct lat/lng field — it's read from the first
+  // marker/label/image's `position` instead, whichever exists first. A
+  // missing id (or a POI with none of markers/labels/images) resolves to
+  // `null` for that slot rather than throwing, so native can tell "not
+  // found" apart from a real position. `requestId` is echoed back as-is so
+  // native can match this response to the Start press that triggered it.
+  // See docs/features/simulated-position.md.
+  resolvePositions(requestId, originId, destinationId) {
+    const resolve = (poiId) => {
+      const poi = venue?.pois.find((p) => p.id === poiId);
+      const position = poi?.markers?.[0]?.position ?? poi?.labels?.[0]?.position ?? poi?.images?.[0]?.position;
+      return position ? { latitude: position.latitude, longitude: position.longitude } : null;
+    };
+    bridge?.onPositionsResolved(
+      requestId,
+      JSON.stringify(resolve(originId)),
+      JSON.stringify(resolve(destinationId)),
+    );
+  },
+  // Injects/updates the simulated tracked position and its accuracy circle
+  // (precisionCircleRadius, in meters) via view.injectTrackedPosition.
+  // allowTracking must be true first — the SDK throws otherwise — so it's
+  // set here on every call rather than once at Start, which costs nothing
+  // once already true. See docs/features/simulated-position.md.
+  injectTrackedPosition(latitude, longitude, precisionCircleRadius) {
+    if (!view) return;
+    view.allowTracking = true;
+    view.injectTrackedPosition({ position: { latitude, longitude }, precisionCircleRadius });
+  },
+  // Removes the marker/circle injected above. There is no dedicated stop
+  // method on the SDK — setting allowTracking back to false is how it's
+  // cleared. See docs/features/simulated-position.md.
+  stopTrackedPosition() {
+    if (!view) return;
+    view.allowTracking = false;
+  },
 };
 
 // Builds the payload sent to native for the floor-selector UI: the

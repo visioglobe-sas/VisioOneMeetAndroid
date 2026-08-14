@@ -22,4 +22,6 @@
     <string name="ui_part_poi_details_label">POI details</string>
     <string name="ui_part_search_label">Search</string>
     <string name="ui_part_user_tracking_label">User tracking</string>
+    <string name="feature_simulated_position_title">Simulated position</string>
+    <string name="feature_simulated_position_description">Animate a simulated position with an accuracy circle between two POIs.</string>
 </resources>
