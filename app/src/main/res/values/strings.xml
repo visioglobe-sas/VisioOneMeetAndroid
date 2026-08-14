@@ -11,4 +11,6 @@
     <string name="feature_poi_click_description">Tap a POI on the map to see its details.</string>
     <string name="feature_goto_poi_title">Go to POI</string>
     <string name="feature_goto_poi_description">Center the camera on a place by its ID.</string>
+    <string name="feature_floor_selector_title">Floor selector</string>
+    <string name="feature_floor_selector_description">Switch floors in the current building from a native list.</string>
 </resources>

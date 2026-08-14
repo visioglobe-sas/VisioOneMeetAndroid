@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -75,6 +76,60 @@ private fun WebView.goToPlace(placeId: String) {
  */
 private fun WebView.clearPlace() {
     evaluateJavascript("window.MapBridge.clearPlace()", null)
+}
+
+/**
+ * Moves the camera to the floor matching [floorId] within building [buildingId] by calling
+ * `window.MapBridge.goToFloor` in the WebView (`view.goToFloor` under the hood). See
+ * docs/features/floor-selector.md.
+ */
+private fun WebView.goToFloor(buildingId: String, floorId: String) {
+    val script = "window.MapBridge.goToFloor(${JSONObject.quote(buildingId)}, ${JSONObject.quote(floorId)})"
+    evaluateJavascript(script, null)
+}
+
+/** A single floor of the exposed building, carried by the `AndroidBridge.onFloorsReady` payload. See docs/features/floor-selector.md. */
+data class FloorInfo(val id: String, val name: String, val levelIndex: Int)
+
+/**
+ * Snapshot of the floor-selector state, seeded once by `AndroidBridge.onFloorsReady` and kept in
+ * sync afterwards by `AndroidBridge.onFloorChanged`. [floors] belongs to a single building —
+ * today always the venue's first one, see `web/src/main.js`'s `main()` — and [currentFloorId]
+ * reflects the SDK's actual current floor, whether it changed via this overlay's buttons or the
+ * SDK's own default floor-selector widget. See docs/features/floor-selector.md.
+ */
+data class FloorSelectorState(
+    val buildingId: String? = null,
+    val floors: List<FloorInfo> = emptyList(),
+    val currentFloorId: String? = null,
+)
+
+/**
+ * Parses the JSON object emitted once by `window.MapBridge`'s floors-ready payload in
+ * `web/src/main.js`, e.g.
+ * `{"buildingId":"b1","currentFloorId":"f0","floors":[{"id":"f0","name":"Ground floor","levelIndex":0}]}`.
+ * `name` falls back to an empty string when the venue has no translation for it, same convention
+ * as [parsePoiClickPayload].
+ */
+internal fun parseFloorsReadyPayload(json: String): FloorSelectorState {
+    val root = JSONObject(json)
+    val floorsArray = root.getJSONArray("floors")
+    val floors = List(floorsArray.length()) { index ->
+        val entry = floorsArray.getJSONObject(index)
+        FloorInfo(
+            id = entry.getString("id"),
+            name = entry.optString("name", ""),
+            levelIndex = entry.getInt("levelIndex"),
+        )
+    }
+    return FloorSelectorState(
+        // `opt(...) as? String` (rather than `optString`) treats a missing key and an explicit
+        // JSON `null` (e.g. `currentFloorId` when the SDK has no current floor yet) the same way:
+        // JSONObject.NULL is not a String instance, so the cast yields null in both cases.
+        buildingId = root.opt("buildingId") as? String,
+        floors = floors,
+        currentFloorId = root.opt("currentFloorId") as? String,
+    )
 }
 
 @Composable
@@ -165,6 +220,50 @@ fun GoToPoiOverlay(webView: WebView?) {
         Button(onClick = { webView?.clearPlace() }) {
             Text("Clear")
         }
+    }
+}
+
+/**
+ * FAB-triggered control for `floor-selector`: one button per floor of the current building,
+ * highest first, calling [WebView.goToFloor] on tap. The current floor (per
+ * [FloorSelectorState.currentFloorId]) is rendered as a filled [Button] (and disabled, since
+ * tapping it again would be a no-op); every other floor is an [OutlinedButton]. Demonstrates
+ * driving `view.goToFloor` from native code — the SDK's own default floor-selector widget
+ * (visible on the map with no app code at all) already offers this to the end user, see
+ * docs/features/floor-selector.md, "Points d'attention".
+ */
+@Composable
+fun FloorSelectorOverlay(webView: WebView?, floorSelector: FloorSelectorState) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp),
+    ) {
+        if (floorSelector.floors.isEmpty()) {
+            Text("Floor data is not available yet.")
+            return@Column
+        }
+        val buildingId = floorSelector.buildingId
+        floorSelector.floors
+            .sortedByDescending { it.levelIndex }
+            .forEach { floor ->
+                val isCurrent = floor.id == floorSelector.currentFloorId
+                val buttonModifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp)
+                if (isCurrent) {
+                    Button(onClick = {}, enabled = false, modifier = buttonModifier) {
+                        Text(floor.name)
+                    }
+                } else {
+                    OutlinedButton(
+                        onClick = { if (buildingId != null) webView?.goToFloor(buildingId, floor.id) },
+                        modifier = buttonModifier,
+                    ) {
+                        Text(floor.name)
+                    }
+                }
+            }
     }
 }
 
