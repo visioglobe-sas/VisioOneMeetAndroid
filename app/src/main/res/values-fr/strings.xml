@@ -12,4 +12,6 @@
     <string name="feature_goto_poi_description">Centre la caméra sur un lieu à partir de son identifiant.</string>
     <string name="feature_floor_selector_title">Sélecteur d\'étage</string>
     <string name="feature_floor_selector_description">Change d\'étage dans le bâtiment courant depuis une liste native.</string>
+    <string name="feature_compute_navigation_title">Itinéraire</string>
+    <string name="feature_compute_navigation_description">Calcule et affiche un itinéraire entre deux lieux à partir de leurs identifiants.</string>
 </resources>

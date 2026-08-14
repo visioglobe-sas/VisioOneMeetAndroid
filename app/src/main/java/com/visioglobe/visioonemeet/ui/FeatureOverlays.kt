@@ -88,6 +88,23 @@ private fun WebView.goToFloor(buildingId: String, floorId: String) {
     evaluateJavascript(script, null)
 }
 
+/**
+ * Computes and draws a route between [origin] and [destination] (both Place IDs) by calling
+ * `window.MapBridge.computeNavigation` in the WebView (`venue.computeNavigation` +
+ * `venue.createNavigationTrace` + `view.setCurrentNavigationTrace` under the hood). See
+ * docs/features/compute-navigation.md.
+ */
+private fun WebView.computeNavigation(origin: String, destination: String, isAccessible: Boolean) {
+    val script = "window.MapBridge.computeNavigation(" +
+        "${JSONObject.quote(origin)}, ${JSONObject.quote(destination)}, $isAccessible)"
+    evaluateJavascript(script, null)
+}
+
+/** Removes the route drawn by [computeNavigation], if any. See docs/features/compute-navigation.md. */
+private fun WebView.clearNavigation() {
+    evaluateJavascript("window.MapBridge.clearNavigation()", null)
+}
+
 /** A single floor of the exposed building, carried by the `AndroidBridge.onFloorsReady` payload. See docs/features/floor-selector.md. */
 data class FloorInfo(val id: String, val name: String, val levelIndex: Int)
 
@@ -264,6 +281,61 @@ fun FloorSelectorOverlay(webView: WebView?, floorSelector: FloorSelectorState) {
                     }
                 }
             }
+    }
+}
+
+/**
+ * FAB-triggered control for `compute-navigation`: "From"/"To" Place ID fields plus an "Itinerary"
+ * button (computes and draws the route via [WebView.computeNavigation]) and a "Clear" button
+ * (removes it via [WebView.clearNavigation]) — same two-field UX as the React Native sibling's
+ * `ComputeNavigationOverlay`, `isAccessible` fixed to `false` as on that sibling (no UI toggle for
+ * it yet). A failed computation (bad/unreachable Place ID) surfaces [navigationError] below the
+ * fields instead of leaving the map silently unchanged. See docs/features/compute-navigation.md.
+ */
+@Composable
+fun ComputeNavigationOverlay(webView: WebView?, navigationError: String?) {
+    var origin by remember { mutableStateOf("") }
+    var destination by remember { mutableStateOf("") }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp),
+    ) {
+        Row(modifier = Modifier.fillMaxWidth()) {
+            OutlinedTextField(
+                value = origin,
+                onValueChange = { origin = it },
+                label = { Text("From (place ID)") },
+                singleLine = true,
+                modifier = Modifier.weight(1f),
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            OutlinedTextField(
+                value = destination,
+                onValueChange = { destination = it },
+                label = { Text("To (place ID)") },
+                singleLine = true,
+                modifier = Modifier.weight(1f),
+            )
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        Row(modifier = Modifier.fillMaxWidth()) {
+            Button(
+                onClick = { webView?.computeNavigation(origin.trim(), destination.trim(), false) },
+                enabled = origin.isNotBlank() && destination.isNotBlank(),
+            ) {
+                Text("Itinerary")
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            Button(onClick = { webView?.clearNavigation() }) {
+                Text("Clear")
+            }
+        }
+        if (navigationError != null) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(text = navigationError, color = MaterialTheme.colorScheme.error)
+        }
     }
 }
 
