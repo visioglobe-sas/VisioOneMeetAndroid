@@ -17,6 +17,7 @@ import com.visioglobe.visioonemeet.ui.GoToPoiOverlay
 import com.visioglobe.visioonemeet.ui.OccupancySimulationOverlay
 import com.visioglobe.visioonemeet.ui.PoiClickOverlay
 import com.visioglobe.visioonemeet.ui.ResetViewOverlay
+import com.visioglobe.visioonemeet.ui.UiPartVisibilityOverlay
 import com.visioglobe.visioonemeet.ui.theme.VisioOneMeetTheme
 
 /** Hash of the VisioOne map to display, as found on the my.visioglobe.com portal. */
@@ -51,6 +52,7 @@ class MainActivity : ComponentActivity() {
                                     Feature.GoToPoi -> GoToPoiOverlay(webView)
                                     Feature.FloorSelector -> FloorSelectorOverlay(webView, floorSelector)
                                     Feature.ComputeNavigation -> ComputeNavigationOverlay(webView, navigationError)
+                                    Feature.UiPartVisibility -> UiPartVisibilityOverlay(webView)
                                     null -> Unit
                                 }
                             },

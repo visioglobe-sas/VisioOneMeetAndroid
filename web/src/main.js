@@ -125,6 +125,16 @@ window.MapBridge = {
     venue.removeNavigationTrace(currentNavigationTrace);
     currentNavigationTrace = null;
   },
+  // Shows/hides one of the SDK's own default UI overlays via
+  // view.setUIPartVisible. uiPart is one of exactly 5 case-sensitive values
+  // ('floorSelector', 'navigation', 'poiDetails', 'search', 'userTracking' —
+  // see the SDK's View.ts UIPart type); an unrecognized value is rejected by
+  // the SDK itself, this bridge does no validation of its own. See
+  // docs/features/ui-part-visibility.md.
+  setUIPartVisible(uiPart, isVisible) {
+    if (!view) return;
+    view.setUIPartVisible(uiPart, isVisible);
+  },
 };
 
 // Builds the payload sent to native for the floor-selector UI: the

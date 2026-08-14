@@ -12,13 +12,16 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -104,6 +107,31 @@ private fun WebView.computeNavigation(origin: String, destination: String, isAcc
 private fun WebView.clearNavigation() {
     evaluateJavascript("window.MapBridge.clearNavigation()", null)
 }
+
+/**
+ * Shows/hides one of the SDK's own default UI overlays by calling
+ * `window.MapBridge.setUIPartVisible` in the WebView (`view.setUIPartVisible` under the hood).
+ * [uiPart] must be one of the SDK's exact, case-sensitive values (`floorSelector`, `navigation`,
+ * `poiDetails`, `search`, `userTracking`) — see [UI_PART_TOGGLES] below. See
+ * docs/features/ui-part-visibility.md.
+ */
+private fun WebView.setUiPartVisible(uiPart: String, isVisible: Boolean) {
+    val script = "window.MapBridge.setUIPartVisible(${JSONObject.quote(uiPart)}, $isVisible)"
+    evaluateJavascript(script, null)
+}
+
+/**
+ * The 5 UI parts the SDK's `View.setUIPartVisible` accepts, paired with a human-readable label.
+ * These string values are exact and case-sensitive — they are not free-form, the SDK defines no
+ * others. See docs/features/ui-part-visibility.md.
+ */
+private val UI_PART_TOGGLES = listOf(
+    "floorSelector" to R.string.ui_part_floor_selector_label,
+    "navigation" to R.string.ui_part_navigation_label,
+    "poiDetails" to R.string.ui_part_poi_details_label,
+    "search" to R.string.ui_part_search_label,
+    "userTracking" to R.string.ui_part_user_tracking_label,
+)
 
 /** A single floor of the exposed building, carried by the `AndroidBridge.onFloorsReady` payload. See docs/features/floor-selector.md. */
 data class FloorInfo(val id: String, val name: String, val levelIndex: Int)
@@ -380,6 +408,47 @@ fun PoiClickOverlay(pois: List<PoiClickInfo>) {
                 style = MaterialTheme.typography.titleMedium,
             )
             Text(text = "ID: ${poi.id}", style = MaterialTheme.typography.bodyMedium)
+        }
+    }
+}
+
+/**
+ * FAB-triggered control for `ui-part-visibility`: one switch per [UI_PART_TOGGLES] entry, each
+ * calling [WebView.setUiPartVisible] on toggle so the effect is visible immediately on the map
+ * behind the sheet. All 5 default to visible/on, matching the SDK's own default — nothing is
+ * hidden until the user flips a switch. Local state only: this overlay does not read back
+ * `view.isUIPartVisible`, so re-opening the sheet after leaving and returning to this screen still
+ * shows all switches on regardless of the map's actual state (the WebView, and the underlying
+ * view/venue, are recreated on every screen visit, see `FeatureMapScreen`'s kdoc — so in practice
+ * the two stay in sync anyway). See docs/features/ui-part-visibility.md.
+ */
+@Composable
+fun UiPartVisibilityOverlay(webView: WebView?) {
+    val visibility = remember {
+        mutableStateMapOf(*UI_PART_TOGGLES.map { (uiPart, _) -> uiPart to true }.toTypedArray())
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp),
+    ) {
+        UI_PART_TOGGLES.forEach { (uiPart, labelRes) ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(text = stringResource(labelRes), modifier = Modifier.weight(1f))
+                Switch(
+                    checked = visibility[uiPart] == true,
+                    onCheckedChange = { isVisible ->
+                        visibility[uiPart] = isVisible
+                        webView?.setUiPartVisible(uiPart, isVisible)
+                    },
+                )
+            }
         }
     }
 }

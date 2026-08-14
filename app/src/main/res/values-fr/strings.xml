@@ -14,4 +14,11 @@
     <string name="feature_floor_selector_description">Change d\'étage dans le bâtiment courant depuis une liste native.</string>
     <string name="feature_compute_navigation_title">Itinéraire</string>
     <string name="feature_compute_navigation_description">Calcule et affiche un itinéraire entre deux lieux à partir de leurs identifiants.</string>
+    <string name="feature_ui_part_visibility_title">Visibilité de l\'UI</string>
+    <string name="feature_ui_part_visibility_description">Afficher ou masquer individuellement les parties de l\'UI par défaut de la carte.</string>
+    <string name="ui_part_floor_selector_label">Sélecteur d\'étage</string>
+    <string name="ui_part_navigation_label">Navigation</string>
+    <string name="ui_part_poi_details_label">Détails du POI</string>
+    <string name="ui_part_search_label">Recherche</string>
+    <string name="ui_part_user_tracking_label">Suivi de position</string>
 </resources>
