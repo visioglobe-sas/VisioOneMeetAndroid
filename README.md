@@ -1,33 +1,68 @@
 # VisioOne Meet Android
 
-App Android (Kotlin + Jetpack Compose) qui affiche une carte [VisioOne](https://my.visioglobe.com/docs/VisioOne/docs/) dans une WebView.
+An Android app (Kotlin + Jetpack Compose) that displays a [VisioOne](https://my.visioglobe.com/docs/VisioOne/docs/) indoor map inside a `WebView`. VisioOne is a JS/WebGL SDK (`@visioglobe/visioone` on npm) — there's no native Android SDK for it, so the map is embedded via a small bundled web page rather than a native map view.
 
-## Comment ça marche
+Use this repo as a starting point for embedding VisioOne in your own native Android app: it demonstrates the WebView/asset-loader setup, the native↔JS bridge, and a growing set of individual SDK features (see below).
 
-Le SDK VisioOne (`@visioglobe/visioone` sur npm) est un SDK JS/WebGL. Il est bundlé une fois avec Vite (dossier `web/`), et le résultat est copié dans `app/src/main/assets/www/`. L'app Android sert ensuite ces fichiers dans une `WebView` via `WebViewAssetLoader` (origine `https://appassets.androidx.local/...`), ce qui évite les soucis de CORS liés au chargement de modules ES depuis `file://`.
+## Setup
 
-Le hash de la carte est passé en query param (`index.html?hash=...`) par `VisioOneMapScreen.kt`, donc changer de carte ne nécessite pas de rebuild du bundle web — seule la constante `DEFAULT_MAP_HASH` dans `MainActivity.kt` doit changer.
+### Prerequisites
 
-Un pont JS (`window.AndroidBridge`, voir `web/src/main.js`) notifie la Compose UI quand la carte est prête (`onMapReady`) ou en erreur (`onMapError`), pour afficher un loader / message d'erreur pendant le chargement (qui prend ~20-30s au premier lancement, le temps de récupérer les assets 3D depuis `mapserver.visioglobe.com`).
+- Android Studio / the Android SDK, with `compileSdk` 36 installed.
+- Node.js and npm, to build the web bundle.
+- A VisioOne map hash from [my.visioglobe.com](https://my.visioglobe.com) — a 41-character alphanumeric ID for a map that has been "built" on the portal. Map assets load at runtime from `mapserver.visioglobe.com`, so a device/emulator needs internet access (the first cold load takes ~20-30s while 3D assets download).
 
-## Structure
+### Configure your map
 
+Set your own map hash in `app/src/main/java/com/visioglobe/visioonemeet/MainActivity.kt`:
+
+```kotlin
+private const val DEFAULT_MAP_HASH = "kbae8e6c066cca4b02c2afac2bc963a643d87437a"
 ```
-app/                    Projet Android (Compose)
-  src/main/assets/www/  Bundle web généré (voir web/), servi par la WebView
-web/                    Petit projet Vite qui importe @visioglobe/visioone
-```
 
-## Build & run
+The hash is passed to the web bundle as a URL query param (`index.html?hash=...`), so switching maps only means changing this constant — it does not require rebuilding the web bundle.
+
+### Build, install & run
 
 ```bash
 ./gradlew installDebug
 ```
 
-## Mettre à jour le bundle web (nouvelle version du SDK, changement de web/src/main.js, etc.)
+### Update the web bundle
+
+The web bundle (`app/src/main/assets/www/`) is checked into the repo, not generated at Android build time — Gradle never rebuilds it for you. Rebuild it manually whenever you change `web/src/main.js` or bump the SDK version in `web/package.json`:
 
 ```bash
 cd web
 npm install
-npm run build   # écrit directement dans ../app/src/main/assets/www
+npm run build   # writes directly into ../app/src/main/assets/www
+```
+
+## Features
+
+Each feature below is a self-contained screen in the app demonstrating one VisioOne SDK capability. Every doc focuses on the SDK call itself — signature, behavior, gotchas — rather than this app's UI plumbing.
+
+- [Reset View](docs/features/reset-view.md) — recenter the camera on the whole venue via `view.goToGlobal()`.
+- [Occupancy Overlay (Simulated Data)](docs/features/occupancy-simulated.md) — color a POI's surfaces to reflect a live occupancy status via `venue.updateSurface()`.
+- [POI Click](docs/features/poi-click.md) — react natively to a tap on a POI via the SDK's `poiclick` event.
+- [Go to POI](docs/features/goto-poi.md) — center the camera on a POI by id via `view.goToPOI()` and highlight its surfaces.
+- [Floor Selector](docs/features/floor-selector.md) — drive floor changes from a native UI via `view.goToFloor()`, in sync with the `currentfloorchanged` event.
+- [Compute Navigation](docs/features/compute-navigation.md) — compute and draw a route between two POIs via `venue.computeNavigation()`.
+- [UI Part Visibility](docs/features/ui-part-visibility.md) — toggle individual pieces of the SDK's default on-map UI via `view.setUIPartVisible()`.
+- [Simulated Position](docs/features/simulated-position.md) — animate a simulated tracked position via `view.injectTrackedPosition()`, the same API a real indoor-positioning integration would use.
+- [Camera Lock on Position](docs/features/camera-lock-on-position.md) — lock the camera onto a tracked position via `view.lockCameraPositionOnTracking`.
+
+## How it works
+
+The VisioOne SDK is bundled once with Vite (`web/`), and the build output is copied into `app/src/main/assets/www/`. The Android app serves these files inside a `WebView` via `WebViewAssetLoader` (origin `https://appassets.androidx.local/...`), which avoids the CORS issues that come from loading ES modules over `file://`.
+
+A JS bridge (`window.AndroidBridge`, see `web/src/main.js`) notifies the Compose UI when the map is ready (`onMapReady`) or has failed (`onMapError`), driving a loading/error overlay while the map loads.
+
+## Repo structure
+
+```
+app/                    Android project (Compose)
+  src/main/assets/www/  Generated web bundle (see web/), served by the WebView
+web/                    Small Vite project that imports @visioglobe/visioone
+docs/features/          Per-feature SDK reference docs (see Features above)
 ```
