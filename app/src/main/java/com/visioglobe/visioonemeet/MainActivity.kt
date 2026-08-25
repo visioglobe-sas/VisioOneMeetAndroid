@@ -9,6 +9,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.visioglobe.visioonemeet.model.Feature
+import com.visioglobe.visioonemeet.ui.CameraLockOnPositionOverlay
 import com.visioglobe.visioonemeet.ui.ComputeNavigationOverlay
 import com.visioglobe.visioonemeet.ui.FeatureMapScreen
 import com.visioglobe.visioonemeet.ui.FeatureMenuScreen
@@ -55,6 +56,8 @@ class MainActivity : ComponentActivity() {
                                     Feature.ComputeNavigation -> ComputeNavigationOverlay(webView, navigationError)
                                     Feature.UiPartVisibility -> UiPartVisibilityOverlay(webView)
                                     Feature.SimulatedPosition -> SimulatedPositionOverlay(webView, positionsResolved)
+                                    Feature.CameraLockOnPosition ->
+                                        CameraLockOnPositionOverlay(webView, positionsResolved)
                                     null -> Unit
                                 }
                             },

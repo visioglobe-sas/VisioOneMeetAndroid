@@ -49,6 +49,11 @@ enum class Feature(
         titleRes = R.string.feature_simulated_position_title,
         descriptionRes = R.string.feature_simulated_position_description,
     ),
+    CameraLockOnPosition(
+        slug = "camera-lock-on-position",
+        titleRes = R.string.feature_camera_lock_on_position_title,
+        descriptionRes = R.string.feature_camera_lock_on_position_description,
+    ),
     ;
 
     companion object {

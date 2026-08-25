@@ -173,6 +173,15 @@ window.MapBridge = {
     if (!view) return;
     view.allowTracking = false;
   },
+  // Binds/unbinds the camera's focus to the tracked position injected above,
+  // GPS-app "recenter on me" style, via view.lockCameraPositionOnTracking.
+  // Has no visible effect until a position has been injected (allowTracking
+  // must be true — see injectTrackedPosition above), same precondition the
+  // SDK documents on the flag itself. See docs/features/camera-lock-on-position.md.
+  setCameraLockOnPosition(locked) {
+    if (!view) return;
+    view.lockCameraPositionOnTracking = locked;
+  },
 };
 
 // Builds the payload sent to native for the floor-selector UI: the
