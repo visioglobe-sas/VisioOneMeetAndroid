@@ -23,4 +23,6 @@
     <string name="ui_part_user_tracking_label">Suivi de position</string>
     <string name="feature_simulated_position_title">Position simulée</string>
     <string name="feature_simulated_position_description">Anime une position simulée avec un cercle de précision entre deux POI.</string>
+    <string name="feature_camera_lock_on_position_title">Verrouillage caméra</string>
+    <string name="feature_camera_lock_on_position_description">Verrouille la caméra sur la position simulée, façon bouton \"recentrer sur moi\" d\'app GPS.</string>
 </resources>

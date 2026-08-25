@@ -177,6 +177,15 @@ private fun WebView.stopTrackedPosition() {
     evaluateJavascript("window.MapBridge.stopTrackedPosition()", null)
 }
 
+/**
+ * Binds/unbinds the camera's focus to the tracked position by calling
+ * `window.MapBridge.setCameraLockOnPosition` in the WebView (`view.lockCameraPositionOnTracking`
+ * under the hood). See docs/features/camera-lock-on-position.md.
+ */
+private fun WebView.setCameraLockOnPosition(locked: Boolean) {
+    evaluateJavascript("window.MapBridge.setCameraLockOnPosition($locked)", null)
+}
+
 /** A WGS84 position resolved for a POI, as reported by `AndroidBridge.onPositionsResolved`. */
 data class ResolvedPosition(val latitude: Double, val longitude: Double)
 
@@ -524,22 +533,31 @@ fun UiPartVisibilityOverlay(webView: WebView?) {
 }
 
 /**
- * FAB-triggered control for `simulated-position`: Origin/Destination POI ID fields, a radius
- * `Slider` (1-20m, [SIMULATED_POSITION_DEFAULT_RADIUS_METERS] by default) and a Start/Stop toggle
- * button — same toggle pattern as [OccupancySimulationOverlay]. Pressing Start resolves both POI
- * ids in one round trip via [WebView.resolvePositions]; a `null` slot in the response ("POI not
- * found") surfaces [errorMessage] below the fields instead of starting anything, same error-
- * surfacing convention as [ComputeNavigationOverlay]. Once both positions resolve, a
- * [LaunchedEffect] repeatedly calls [WebView.injectTrackedPosition] with a point linearly
- * interpolated between origin and destination, ping-ponging back and forth — reading [radiusMeters]
- * fresh on every tick, so moving the slider while running changes the radius on the *next* tick
- * with no restart needed. Stop (or leaving the screen, which cancels this effect and tears down
- * the WebView) calls [WebView.stopTrackedPosition] via the effect's `finally` block, same
- * cleanup-on-cancellation idiom as [OccupancySimulationOverlay]. See
- * docs/features/simulated-position.md.
+ * Origin/Destination POI ID fields, a radius `Slider` (1-20m,
+ * [SIMULATED_POSITION_DEFAULT_RADIUS_METERS] by default) and a Start/Stop toggle button — same
+ * toggle pattern as [OccupancySimulationOverlay] — shared by [SimulatedPositionOverlay] and
+ * [CameraLockOnPositionOverlay] (the latter needs a moving position to demonstrate a camera lock
+ * on it). Pressing Start resolves both POI ids in one round trip via [WebView.resolvePositions]; a
+ * `null` slot in the response ("POI not found") surfaces [errorMessage] below the fields instead
+ * of starting anything, same error-surfacing convention as [ComputeNavigationOverlay]. Once both
+ * positions resolve, a [LaunchedEffect] repeatedly calls [WebView.injectTrackedPosition] with a
+ * point linearly interpolated between origin and destination, ping-ponging back and forth —
+ * reading [radiusMeters] fresh on every tick, so moving the slider while running changes the
+ * radius on the *next* tick with no restart needed. Stop (or leaving the screen, which cancels
+ * this effect and tears down the WebView) calls [WebView.stopTrackedPosition] via the effect's
+ * `finally` block, same cleanup-on-cancellation idiom as [OccupancySimulationOverlay].
+ * [onRunningChanged] reports every start/stop transition so a caller can react (e.g. resetting a
+ * dependent switch); [extraContent] renders below the Start/Stop button and its error message,
+ * nothing for [SimulatedPositionOverlay], the camera-lock switch for [CameraLockOnPositionOverlay].
+ * See docs/features/simulated-position.md and docs/features/camera-lock-on-position.md.
  */
 @Composable
-fun SimulatedPositionOverlay(webView: WebView?, positionsResolved: ResolvedPositionsPair?) {
+private fun TrackedPositionSimulationControls(
+    webView: WebView?,
+    positionsResolved: ResolvedPositionsPair?,
+    onRunningChanged: (Boolean) -> Unit = {},
+    extraContent: @Composable () -> Unit = {},
+) {
     var originId by remember { mutableStateOf("") }
     var destinationId by remember { mutableStateOf("") }
     var radiusMeters by remember { mutableFloatStateOf(SIMULATED_POSITION_DEFAULT_RADIUS_METERS) }
@@ -567,6 +585,8 @@ fun SimulatedPositionOverlay(webView: WebView?, positionsResolved: ResolvedPosit
             isRunning = true
         }
     }
+
+    LaunchedEffect(isRunning) { onRunningChanged(isRunning) }
 
     Column(
         modifier = Modifier
@@ -621,6 +641,7 @@ fun SimulatedPositionOverlay(webView: WebView?, positionsResolved: ResolvedPosit
             Spacer(modifier = Modifier.height(8.dp))
             Text(text = errorMessage.orEmpty(), color = MaterialTheme.colorScheme.error)
         }
+        extraContent()
     }
 
     LaunchedEffect(isRunning, activePositions, webView) {
@@ -652,4 +673,57 @@ fun SimulatedPositionOverlay(webView: WebView?, positionsResolved: ResolvedPosit
             view.stopTrackedPosition()
         }
     }
+}
+
+/**
+ * FAB-triggered control for `simulated-position`: [TrackedPositionSimulationControls] with no
+ * extra content. See docs/features/simulated-position.md.
+ */
+@Composable
+fun SimulatedPositionOverlay(webView: WebView?, positionsResolved: ResolvedPositionsPair?) {
+    TrackedPositionSimulationControls(webView, positionsResolved)
+}
+
+/**
+ * FAB-triggered control for `camera-lock-on-position`: [TrackedPositionSimulationControls] (a
+ * moving position is needed to demonstrate a camera lock on it) plus a "Recenter on me" `Switch`
+ * that flips `view.lockCameraPositionOnTracking` via [WebView.setCameraLockOnPosition] — the
+ * GPS-app-style behavior this feature demonstrates. The switch is disabled while no simulation is
+ * running (nothing to lock onto) and is reset to off whenever the simulation stops, so restarting
+ * always begins unlocked — a fresh, deliberate opt-in each time, same pattern as radiusMeters not
+ * needing a restart to apply. See docs/features/camera-lock-on-position.md.
+ */
+@Composable
+fun CameraLockOnPositionOverlay(webView: WebView?, positionsResolved: ResolvedPositionsPair?) {
+    var isRunning by remember { mutableStateOf(false) }
+    var isLocked by remember { mutableStateOf(false) }
+
+    TrackedPositionSimulationControls(
+        webView = webView,
+        positionsResolved = positionsResolved,
+        onRunningChanged = { running ->
+            isRunning = running
+            if (!running && isLocked) {
+                isLocked = false
+                webView?.setCameraLockOnPosition(false)
+            }
+        },
+        extraContent = {
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(text = "Recenter camera on position", modifier = Modifier.weight(1f))
+                Switch(
+                    checked = isLocked,
+                    enabled = isRunning,
+                    onCheckedChange = { locked ->
+                        isLocked = locked
+                        webView?.setCameraLockOnPosition(locked)
+                    },
+                )
+            }
+        },
+    )
 }
