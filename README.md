@@ -22,6 +22,8 @@ private const val DEFAULT_MAP_HASH = "kbae8e6c066cca4b02c2afac2bc963a643d87437a"
 
 The hash is passed to the web bundle as a URL query param (`index.html?hash=...`), so switching maps only means changing this constant — it does not require rebuilding the web bundle.
 
+The [Custom Data](docs/features/custom-data.md) screen is the one exception: it always loads its own dedicated map hash regardless of `DEFAULT_MAP_HASH`, because the venue above has no CustomData published — see that feature's doc for why and which hash.
+
 ### Build, install & run
 
 ```bash

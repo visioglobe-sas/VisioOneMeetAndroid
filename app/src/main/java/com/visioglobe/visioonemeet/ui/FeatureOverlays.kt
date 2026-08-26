@@ -2,6 +2,7 @@ package com.visioglobe.visioonemeet.ui
 
 import android.webkit.WebView
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -813,14 +814,24 @@ fun ClickableSurfaceOverlay(webView: WebView?) {
 }
 
 /**
+ * Place IDs confirmed (via a direct query against the venue behind [CUSTOM_DATA_MAP_HASH] in
+ * `MainActivity.kt`) to carry real, non-empty CustomData — offered as quick-select chips in
+ * [CustomDataOverlay] so trying the feature doesn't require knowing a valid POI id upfront. See
+ * docs/features/custom-data.md.
+ */
+private val CUSTOM_DATA_SAMPLE_PLACE_IDS = listOf("B1", "B3-UL00-ID0065", "B3-UL00-ID0064")
+
+/**
  * FAB-triggered control for `custom-data`: a Place ID field plus a single "Load" button that calls
  * [WebView.loadCustomData] — combining `venue.refreshCustomData()` and `venue.getPOICustomData()`
- * into one round trip, since a demo has no reason to expose them as two separate steps. `requestId`
- * guards against a stale response overwriting a more recent request's outcome, same pattern as
- * [TrackedPositionSimulationControls]. All three outcomes are rendered as normal states, not
- * errors: every key/value pair when [CustomDataResult.customData] is non-empty, "No custom data
- * for this POI" when it resolves to an empty map, and "POI not found" when it's `null`. See
- * docs/features/custom-data.md.
+ * into one round trip, since a demo has no reason to expose them as two separate steps. Above the
+ * field, one chip per [CUSTOM_DATA_SAMPLE_PLACE_IDS] entry fills it and immediately triggers Load,
+ * since free-typing a valid id is otherwise guesswork; the field still accepts free-text entry for
+ * any other id. `requestId` guards against a stale response overwriting a more recent request's
+ * outcome, same pattern as [TrackedPositionSimulationControls]. All three outcomes are rendered as
+ * normal states, not errors: every key/value pair when [CustomDataResult.customData] is non-empty,
+ * "No custom data for this POI" when it resolves to an empty map, and "POI not found" when it's
+ * `null`. See docs/features/custom-data.md.
  */
 @Composable
 fun CustomDataOverlay(webView: WebView?, customDataLoaded: CustomDataResult?) {
@@ -838,11 +849,35 @@ fun CustomDataOverlay(webView: WebView?, customDataLoaded: CustomDataResult?) {
         hasResult = true
     }
 
+    fun load(targetPlaceId: String) {
+        hasResult = false
+        result = null
+        val requestId = nextRequestId++
+        pendingRequestId = requestId
+        webView?.loadCustomData(requestId, targetPlaceId)
+    }
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(16.dp),
     ) {
+        Text("Known POIs with real data:", style = MaterialTheme.typography.bodySmall)
+        Spacer(modifier = Modifier.height(4.dp))
+        FlowRow(modifier = Modifier.fillMaxWidth()) {
+            CUSTOM_DATA_SAMPLE_PLACE_IDS.forEach { sampleId ->
+                OutlinedButton(
+                    onClick = {
+                        placeId = sampleId
+                        load(sampleId)
+                    },
+                    modifier = Modifier.padding(end = 8.dp, bottom = 4.dp),
+                ) {
+                    Text(sampleId)
+                }
+            }
+        }
+        Spacer(modifier = Modifier.height(8.dp))
         Row(modifier = Modifier.fillMaxWidth()) {
             OutlinedTextField(
                 value = placeId,
@@ -853,13 +888,7 @@ fun CustomDataOverlay(webView: WebView?, customDataLoaded: CustomDataResult?) {
             )
             Spacer(modifier = Modifier.width(8.dp))
             Button(
-                onClick = {
-                    hasResult = false
-                    result = null
-                    val requestId = nextRequestId++
-                    pendingRequestId = requestId
-                    webView?.loadCustomData(requestId, placeId.trim())
-                },
+                onClick = { load(placeId.trim()) },
                 enabled = placeId.isNotBlank(),
             ) {
                 Text("Load")

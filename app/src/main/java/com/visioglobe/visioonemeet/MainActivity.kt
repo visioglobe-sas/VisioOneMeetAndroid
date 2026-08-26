@@ -27,6 +27,13 @@ import com.visioglobe.visioonemeet.ui.theme.VisioOneMeetTheme
 /** Hash of the VisioOne map to display, as found on the my.visioglobe.com portal. */
 private const val DEFAULT_MAP_HASH = "kbae8e6c066cca4b02c2afac2bc963a643d87437a"
 
+/**
+ * Dedicated map hash used only by [Feature.CustomData], which needs a venue with real published
+ * CustomData to demonstrate anything beyond the empty state — [DEFAULT_MAP_HASH] has none. See
+ * docs/features/custom-data.md.
+ */
+private const val CUSTOM_DATA_MAP_HASH = "kd9426d8cb3f1c532f22b5bcbd325c280bd351feb"
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -43,7 +50,7 @@ class MainActivity : ComponentActivity() {
                     composable("feature/{slug}") { backStackEntry ->
                         val feature = Feature.fromSlug(backStackEntry.arguments?.getString("slug"))
                         FeatureMapScreen(
-                            mapHash = DEFAULT_MAP_HASH,
+                            mapHash = if (feature == Feature.CustomData) CUSTOM_DATA_MAP_HASH else DEFAULT_MAP_HASH,
                             titleRes = feature?.titleRes,
                             modifier = Modifier.fillMaxSize(),
                             reactsToPoiClicks = feature == Feature.PoiClick,

@@ -4,6 +4,12 @@
 
 Reads free-form business key/value data (price, opening hours, product reference, etc.) attached to a POI in VisioMapEditor, via `venue.getPOICustomData(poi)`. This cache is not populated automatically when the venue loads — `venue.refreshCustomData()` must be awaited at least once before any lookup can return real data.
 
+> **Note:** this demo screen loads a dedicated map hash (`kd9426d8cb3f1c532f22b5bcbd325c280bd351feb`), distinct from the rest of the app's shared demo map (`DEFAULT_MAP_HASH` in `MainActivity.kt`), because that shared venue has no CustomData published yet — it would only ever demonstrate the empty state. This venue has confirmed real data on the following POI ids, offered as quick-select chips in the overlay:
+>
+> - `B1` → `{"CSM ID":"BLBLA"}`
+> - `B3-UL00-ID0065` → `{"Sensor X":"17718393"}`
+> - `B3-UL00-ID0064` → `{"SENSOR":"DDDZEZHJF"}`
+
 ## SDK usage
 
 ```js
