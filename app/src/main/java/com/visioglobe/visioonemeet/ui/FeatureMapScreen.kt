@@ -83,6 +83,10 @@ private sealed interface MapLoadState {
  * `getCategories` (`category-highlight`'s venue-categories lookup) reports its result back via
  * `AndroidBridge.onCategoriesLoaded`, surfaced to [sheetContent] as its seventh argument. See
  * docs/features/category-highlight.md.
+ *
+ * `createDynamicPoi` (`dynamic-poi-crud`'s create-then-attach-a-label round trip) reports its
+ * result back via `AndroidBridge.onDynamicPoiCreated`, surfaced to [sheetContent] as its eighth
+ * argument. See docs/features/dynamic-poi-crud.md.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -100,6 +104,7 @@ fun FeatureMapScreen(
         positionsResolved: ResolvedPositionsPair?,
         customDataLoaded: CustomDataResult?,
         categoriesLoaded: CategoriesResult?,
+        dynamicPoiCreated: DynamicPoiCreationResult?,
     ) -> Unit,
 ) {
     var loadState by remember { mutableStateOf<MapLoadState>(MapLoadState.Loading) }
@@ -112,6 +117,7 @@ fun FeatureMapScreen(
     var positionsResolved by remember { mutableStateOf<ResolvedPositionsPair?>(null) }
     var customDataLoaded by remember { mutableStateOf<CustomDataResult?>(null) }
     var categoriesLoaded by remember { mutableStateOf<CategoriesResult?>(null) }
+    var dynamicPoiCreated by remember { mutableStateOf<DynamicPoiCreationResult?>(null) }
     val sheetState = rememberModalBottomSheetState()
 
     Scaffold(
@@ -212,6 +218,11 @@ fun FeatureMapScreen(
                                         )
                                     }
                                 },
+                                notifyDynamicPoiCreated = { requestId, resultJson ->
+                                    mainHandler.post {
+                                        dynamicPoiCreated = parseDynamicPoiCreationPayload(requestId, resultJson)
+                                    }
+                                },
                             ),
                             "AndroidBridge",
                         )
@@ -259,6 +270,7 @@ fun FeatureMapScreen(
                 positionsResolved,
                 customDataLoaded,
                 categoriesLoaded,
+                dynamicPoiCreated,
             )
         }
     }
@@ -275,6 +287,7 @@ private class MapBridge(
     private val notifyPositionsResolved: (Int, String, String) -> Unit,
     private val notifyCustomDataLoaded: (Int, String) -> Unit,
     private val notifyCategoriesLoaded: (Int, String) -> Unit,
+    private val notifyDynamicPoiCreated: (Int, String) -> Unit,
 ) {
     @JavascriptInterface
     fun onMapReady() = onReady()
@@ -308,4 +321,8 @@ private class MapBridge(
     @JavascriptInterface
     fun onCategoriesLoaded(requestId: Int, categoriesJson: String) =
         notifyCategoriesLoaded(requestId, categoriesJson)
+
+    @JavascriptInterface
+    fun onDynamicPoiCreated(requestId: Int, resultJson: String) =
+        notifyDynamicPoiCreated(requestId, resultJson)
 }
