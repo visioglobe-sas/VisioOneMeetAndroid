@@ -290,10 +290,12 @@ internal fun parseResolvedPosition(json: String): ResolvedPosition? {
     return ResolvedPosition(latitude = root.getDouble("latitude"), longitude = root.getDouble("longitude"))
 }
 
-/** A single venue category, carried by the `AndroidBridge.onCategoriesLoaded` payload. `id` is the
- * SDK's `Category.id` — on the shared demo map this already resolves to a human-readable name
- * (e.g. "Food and Beverage"). See docs/features/category-highlight.md. */
-data class CategoryInfo(val id: String)
+/** A single venue category, carried by the `AndroidBridge.onCategoriesLoaded` payload. [id] is the
+ * SDK's raw `Category.id` (a numeric string on the shared demo map, e.g. "1".."11") — used for
+ * filtering/highlighting. [label] is the human-readable name resolved via
+ * `venue.translator.translateCategory()` on the JS side — display only. See
+ * docs/features/category-highlight.md. */
+data class CategoryInfo(val id: String, val label: String)
 
 /**
  * Result of a [WebView.getCategories] call: [requestId] echoes the value passed to that call, so a
@@ -303,11 +305,14 @@ data class CategoriesResult(val requestId: Int, val categories: List<CategoryInf
 
 /**
  * Parses the JSON array argument of `AndroidBridge.onCategoriesLoaded`, e.g.
- * `[{"id":"Food and Beverage"},{"id":"Shops"}]`.
+ * `[{"id":"5","label":"Food and Beverage"},{"id":"9","label":"Shops"}]`.
  */
 internal fun parseCategoriesPayload(json: String): List<CategoryInfo> {
     val array = JSONArray(json)
-    return List(array.length()) { index -> CategoryInfo(id = array.getJSONObject(index).getString("id")) }
+    return List(array.length()) { index ->
+        val obj = array.getJSONObject(index)
+        CategoryInfo(id = obj.getString("id"), label = obj.getString("label"))
+    }
 }
 
 /** A single floor of the exposed building, carried by the `AndroidBridge.onFloorsReady` payload. See docs/features/floor-selector.md. */
@@ -963,8 +968,9 @@ fun CustomDataOverlay(webView: WebView?, customDataLoaded: CustomDataResult?) {
 
 /**
  * FAB-triggered control for `category-highlight`: one [FilterChip] per `venue.categories` entry
- * (label = [CategoryInfo.id], already a human-readable name on the shared demo map), requested
- * once via [WebView.getCategories] as soon as the sheet is given a [webView] — `requestId` guards
+ * (label = [CategoryInfo.label], the human-readable name resolved via `translateCategory` on the
+ * JS side — [CategoryInfo.id] is the raw identifier used for filtering/highlighting, not display),
+ * requested once via [WebView.getCategories] as soon as the sheet is given a [webView] — `requestId` guards
  * against a stale response the same way as [CustomDataOverlay]. Tapping a chip calls
  * [WebView.highlightCategory]; tapping the already-selected chip again, or the "Clear" button
  * shown below the chips once one is selected, calls [WebView.clearCategoryHighlight] instead. Only
@@ -1019,7 +1025,7 @@ fun CategoryHighlightOverlay(webView: WebView?, categoriesLoaded: CategoriesResu
                 FilterChip(
                     selected = category.id == selectedCategoryId,
                     onClick = { toggle(category.id) },
-                    label = { Text(category.id) },
+                    label = { Text(category.label) },
                     modifier = Modifier.padding(end = 8.dp, bottom = 8.dp),
                 )
             }

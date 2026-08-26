@@ -10,12 +10,17 @@ Highlights every POI belonging to a chosen category (e.g. all restaurants, all s
 // web/src/main.js
 
 // Sends the venue's full category list back to native. Category is
-// `{ readonly id: string }` — on this app's shared demo map, `id` already
-// resolves to a human-readable name (e.g. "Food and Beverage"), so unlike
-// POI/floor names elsewhere in this file, no Translator lookup is needed.
+// `{ readonly id: string }` — a raw internal identifier (a numeric string
+// on this app's shared demo map, e.g. "1".."11"), not itself human-readable.
+// The display name comes from venue.translator.translateCategory(), same
+// Translator lookup already used for POI/floor names elsewhere in this file.
 getCategories(requestId) {
   if (!venue) return;
-  const categories = venue.categories.map((category) => ({ id: category.id }));
+  const locale = venue.currentLocale;
+  const categories = venue.categories.map((category) => ({
+    id: category.id,
+    label: venue.translator.translateCategory(category, locale).name || category.id,
+  }));
   bridge?.onCategoriesLoaded(requestId, JSON.stringify(categories));
 },
 
@@ -86,7 +91,7 @@ fun onCategoriesLoaded(requestId: Int, categoriesJson: String) =
 - **Not every POI has surfaces.** `poi.surfaces` is an empty array for point/marker-only POIs (e.g. outdoor markers with `type: -1`), so `updateSurface` simply has nothing to iterate for them — they don't visually highlight even though they may belong to the selected category. This is expected, not a bug; it means "highlight by category" only ever affects POIs that have an actual surface geometry (rooms, shops, zones), not marker-only points of interest.
 - **`color: 'initial'` is the correct reset sentinel, not `undefined`.** Per `SurfaceUpdateOptions`'s own doc comment, `'initial'` tells the SDK to restore the surface's bundle-defined color. Omitting the `color` key (or passing `undefined`) is not equivalent — it simply leaves the color update out of that particular `updateSurface` call, which does not revert a color set by an earlier call. Always pass `'initial'` explicitly to clear a highlight, same gotcha documented in `clickable-surface.md`.
 - **Only one category highlighted at a time is a demo-side choice, not an SDK limitation.** The SDK has no concept of a "current" highlighted category — this repo's `highlightCategory` tracks the previously highlighted category id itself and reverts its POIs' surfaces before applying the new selection, so calling it repeatedly with different ids never leaves more than one category's POIs highlighted simultaneously. An integrator wanting several categories highlighted at once (e.g. different colors per category) can simply skip that revert step.
-- **`venue.categories` entries are just `{ id: string }`.** There is no separate translated/display name field on `Category` itself — the SDK's own doc comment says `id` is "its name translated in default language", baked in at category creation in VisioMapEditor, not resolved at runtime the way POI/floor names are (no `venue.translator.translateCategory()`-style call exists or is needed). Whatever string that venue's categories were actually named with in VisioMapEditor is what `id` returns as-is: live testing against this app's shared demo map (`DEFAULT_MAP_HASH`) showed plain numeric-looking ids (`"1"`, `"2"`, `"3"`, …) rather than descriptive names — evidently how categories happen to be named on that particular venue today, not a translation step this demo is skipping. Either way the feature works the same: the label shown is just whatever `id` is, and highlighting matches on that same string, so a numeric id highlights correctly even though it reads less usefully in the UI than a descriptive one would.
+- **`Category.id` is a raw internal identifier, not a display name.** Despite `Category`'s own doc comment suggesting `id` is "its name translated in default language", live testing against this app's shared demo map (`DEFAULT_MAP_HASH`) shows `id` is actually a plain numeric string (`"1"`, `"2"`, … `"11"`). The real, resolved display name comes from `venue.translator.translateCategory(category, venue.currentLocale).name` — the same `Translator` API already used for POI/floor names elsewhere in this file (`getVenueLayout`/`onPoiClick`). `id` remains what filtering/highlighting must use; `label` is for display only.
 
 ## Learn more
 

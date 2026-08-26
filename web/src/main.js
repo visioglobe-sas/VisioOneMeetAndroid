@@ -245,13 +245,20 @@ window.MapBridge = {
   // Sends the venue's full category list back to native in one round trip,
   // requestId echoed back so native can match this response to whichever
   // call triggered it, same convention as loadCustomData/resolvePositions.
-  // Category is `{ readonly id: string }` — on this shared demo map, `id`
-  // already resolves to a human-readable name (e.g. "Food and Beverage"),
-  // so unlike POI/floor names elsewhere in this file, no Translator lookup
-  // is needed. See docs/features/category-highlight.md.
+  // Category is `{ readonly id: string }` — a raw internal identifier (a
+  // numeric string on this shared demo map, e.g. "1".."11"), not itself
+  // human-readable — confirmed live. The display name comes from
+  // venue.translator.translateCategory(), same Translator lookup already
+  // used for POI/floor names elsewhere in this file. `id` is still what
+  // filtering/highlighting must use; `label` is for display only. See
+  // docs/features/category-highlight.md.
   getCategories(requestId) {
     if (!venue) return;
-    const categories = venue.categories.map((category) => ({ id: category.id }));
+    const locale = venue.currentLocale;
+    const categories = venue.categories.map((category) => ({
+      id: category.id,
+      label: venue.translator.translateCategory(category, locale).name || category.id,
+    }));
     bridge?.onCategoriesLoaded(requestId, JSON.stringify(categories));
   },
   // Highlights every POI belonging to categoryId by recoloring its
