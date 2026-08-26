@@ -2,6 +2,7 @@ package com.visioglobe.visioonemeet.ui
 
 import android.webkit.WebView
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -194,6 +195,40 @@ private fun WebView.setCameraLockOnPosition(locked: Boolean) {
 private fun WebView.setSurfaceInteractive(placeId: String, interactive: Boolean) {
     val script = "window.MapBridge.setSurfaceInteractive(${JSONObject.quote(placeId)}, $interactive)"
     evaluateJavascript(script, null)
+}
+
+/**
+ * Reloads CustomData from the server and reads the given POI's CustomData in one round trip by
+ * calling `window.MapBridge.loadCustomData` in the WebView (`venue.refreshCustomData()` then
+ * `venue.getPOICustomData(poi)` under the hood). The result arrives asynchronously via
+ * `AndroidBridge.onCustomDataLoaded`, echoing [requestId] back, same convention as
+ * [WebView.resolvePositions]. See docs/features/custom-data.md.
+ */
+private fun WebView.loadCustomData(requestId: Int, placeId: String) {
+    val script = "window.MapBridge.loadCustomData($requestId, ${JSONObject.quote(placeId)})"
+    evaluateJavascript(script, null)
+}
+
+/**
+ * Result of a [WebView.loadCustomData] call: [requestId] echoes the value passed to that call, so
+ * a stale response can be told apart from the current one, same convention as
+ * [ResolvedPositionsPair]. [customData] is `null` when `placeId` didn't resolve to a POI at all
+ * ("POI not found"), and an empty map when the POI resolves but has no CustomData (or the server
+ * has none published yet) — `venue.getPOICustomData()` itself never returns null/undefined, only
+ * `{}`, so that distinction is made on the JS side, not by the SDK. See
+ * docs/features/custom-data.md.
+ */
+data class CustomDataResult(val requestId: Int, val customData: Map<String, String>?)
+
+/**
+ * Parses the JSON argument of `AndroidBridge.onCustomDataLoaded`, e.g. `{"price":"12€"}`, `{}` (no
+ * CustomData for that POI), or the literal string `"null"` (`JSON.stringify(null)` on the JS side,
+ * meaning the POI id didn't resolve at all).
+ */
+internal fun parseCustomDataPayload(json: String): Map<String, String>? {
+    if (json == "null") return null
+    val root = JSONObject(json)
+    return root.keys().asSequence().associateWith { key -> root.getString(key) }
 }
 
 /** A WGS84 position resolved for a POI, as reported by `AndroidBridge.onPositionsResolved`. */
@@ -774,6 +809,101 @@ fun ClickableSurfaceOverlay(webView: WebView?) {
             enabled = placeId.isNotBlank(),
         ) {
             Text("Disable")
+        }
+    }
+}
+
+/**
+ * Place IDs confirmed (via a direct query against the venue behind [CUSTOM_DATA_MAP_HASH] in
+ * `MainActivity.kt`) to carry real, non-empty CustomData — offered as quick-select chips in
+ * [CustomDataOverlay] so trying the feature doesn't require knowing a valid POI id upfront. See
+ * docs/features/custom-data.md.
+ */
+private val CUSTOM_DATA_SAMPLE_PLACE_IDS = listOf("B1", "B3-UL00-ID0065", "B3-UL00-ID0064")
+
+/**
+ * FAB-triggered control for `custom-data`: a Place ID field plus a single "Load" button that calls
+ * [WebView.loadCustomData] — combining `venue.refreshCustomData()` and `venue.getPOICustomData()`
+ * into one round trip, since a demo has no reason to expose them as two separate steps. Above the
+ * field, one chip per [CUSTOM_DATA_SAMPLE_PLACE_IDS] entry fills it and immediately triggers Load,
+ * since free-typing a valid id is otherwise guesswork; the field still accepts free-text entry for
+ * any other id. `requestId` guards against a stale response overwriting a more recent request's
+ * outcome, same pattern as [TrackedPositionSimulationControls]. All three outcomes are rendered as
+ * normal states, not errors: every key/value pair when [CustomDataResult.customData] is non-empty,
+ * "No custom data for this POI" when it resolves to an empty map, and "POI not found" when it's
+ * `null`. See docs/features/custom-data.md.
+ */
+@Composable
+fun CustomDataOverlay(webView: WebView?, customDataLoaded: CustomDataResult?) {
+    var placeId by remember { mutableStateOf("") }
+    var pendingRequestId by remember { mutableStateOf<Int?>(null) }
+    var nextRequestId by remember { mutableStateOf(0) }
+    var result by remember { mutableStateOf<Map<String, String>?>(null) }
+    var hasResult by remember { mutableStateOf(false) }
+
+    LaunchedEffect(customDataLoaded) {
+        val response = customDataLoaded ?: return@LaunchedEffect
+        if (response.requestId != pendingRequestId) return@LaunchedEffect
+        pendingRequestId = null
+        result = response.customData
+        hasResult = true
+    }
+
+    fun load(targetPlaceId: String) {
+        hasResult = false
+        result = null
+        val requestId = nextRequestId++
+        pendingRequestId = requestId
+        webView?.loadCustomData(requestId, targetPlaceId)
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp),
+    ) {
+        Text("Known POIs with real data:", style = MaterialTheme.typography.bodySmall)
+        Spacer(modifier = Modifier.height(4.dp))
+        FlowRow(modifier = Modifier.fillMaxWidth()) {
+            CUSTOM_DATA_SAMPLE_PLACE_IDS.forEach { sampleId ->
+                OutlinedButton(
+                    onClick = {
+                        placeId = sampleId
+                        load(sampleId)
+                    },
+                    modifier = Modifier.padding(end = 8.dp, bottom = 4.dp),
+                ) {
+                    Text(sampleId)
+                }
+            }
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        Row(modifier = Modifier.fillMaxWidth()) {
+            OutlinedTextField(
+                value = placeId,
+                onValueChange = { placeId = it },
+                label = { Text("Place ID") },
+                singleLine = true,
+                modifier = Modifier.weight(1f),
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Button(
+                onClick = { load(placeId.trim()) },
+                enabled = placeId.isNotBlank(),
+            ) {
+                Text("Load")
+            }
+        }
+        if (hasResult) {
+            Spacer(modifier = Modifier.height(12.dp))
+            val data = result
+            when {
+                data == null -> Text("POI not found", color = MaterialTheme.colorScheme.error)
+                data.isEmpty() -> Text("No custom data for this POI")
+                else -> data.forEach { (key, value) ->
+                    Text(text = "$key: $value", style = MaterialTheme.typography.bodyMedium)
+                }
+            }
         }
     }
 }
