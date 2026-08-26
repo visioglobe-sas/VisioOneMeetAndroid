@@ -26,4 +26,6 @@
     <string name="feature_simulated_position_description">Animate a simulated position with an accuracy circle between two POIs.</string>
     <string name="feature_camera_lock_on_position_title">Camera lock</string>
     <string name="feature_camera_lock_on_position_description">Lock the camera onto the simulated position, GPS-app \"recenter on me\" style.</string>
+    <string name="feature_clickable_surface_title">Clickable surface</string>
+    <string name="feature_clickable_surface_description">Make a place\'s surface interactive, with SDK-managed hover/selection colors.</string>
 </resources>

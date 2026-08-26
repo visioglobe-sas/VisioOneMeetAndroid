@@ -51,6 +51,7 @@ Each feature below is a self-contained screen in the app demonstrating one Visio
 - [UI Part Visibility](docs/features/ui-part-visibility.md) — toggle individual pieces of the SDK's default on-map UI via `view.setUIPartVisible()`.
 - [Simulated Position](docs/features/simulated-position.md) — animate a simulated tracked position via `view.injectTrackedPosition()`, the same API a real indoor-positioning integration would use.
 - [Camera Lock on Position](docs/features/camera-lock-on-position.md) — lock the camera onto a tracked position via `view.lockCameraPositionOnTracking`.
+- [Clickable Surface](docs/features/clickable-surface.md) — make a POI's surface interactive, with the SDK managing hover/selection colors via `venue.updateSurface()`.
 
 ## How it works
 

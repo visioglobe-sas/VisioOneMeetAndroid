@@ -25,4 +25,6 @@
     <string name="feature_simulated_position_description">Anime une position simulée avec un cercle de précision entre deux POI.</string>
     <string name="feature_camera_lock_on_position_title">Verrouillage caméra</string>
     <string name="feature_camera_lock_on_position_description">Verrouille la caméra sur la position simulée, façon bouton \"recentrer sur moi\" d\'app GPS.</string>
+    <string name="feature_clickable_surface_title">Surface cliquable</string>
+    <string name="feature_clickable_surface_description">Rend la surface d\'un lieu interactive, avec des couleurs de survol/sélection gérées par le SDK.</string>
 </resources>

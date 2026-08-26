@@ -186,6 +186,16 @@ private fun WebView.setCameraLockOnPosition(locked: Boolean) {
     evaluateJavascript("window.MapBridge.setCameraLockOnPosition($locked)", null)
 }
 
+/**
+ * Makes the POI matching [placeId]'s surfaces interactive (or reverts them) by calling
+ * `window.MapBridge.setSurfaceInteractive` in the WebView (`venue.updateSurface`'s `isInteractive`
+ * flag under the hood). See docs/features/clickable-surface.md.
+ */
+private fun WebView.setSurfaceInteractive(placeId: String, interactive: Boolean) {
+    val script = "window.MapBridge.setSurfaceInteractive(${JSONObject.quote(placeId)}, $interactive)"
+    evaluateJavascript(script, null)
+}
+
 /** A WGS84 position resolved for a POI, as reported by `AndroidBridge.onPositionsResolved`. */
 data class ResolvedPosition(val latitude: Double, val longitude: Double)
 
@@ -726,4 +736,44 @@ fun CameraLockOnPositionOverlay(webView: WebView?, positionsResolved: ResolvedPo
             }
         },
     )
+}
+
+/**
+ * FAB-triggered control for `clickable-surface`: a Place ID field plus "Enable"/"Disable" buttons
+ * calling [WebView.setSurfaceInteractive] — same two-button pattern as [GoToPoiOverlay]'s
+ * "Go"/"Clear". Once enabled, the SDK itself handles the hover/selection color swap when the
+ * surface is tapped on the map; this overlay has no click listener of its own for that. See
+ * docs/features/clickable-surface.md.
+ */
+@Composable
+fun ClickableSurfaceOverlay(webView: WebView?) {
+    var placeId by remember { mutableStateOf("") }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp),
+    ) {
+        OutlinedTextField(
+            value = placeId,
+            onValueChange = { placeId = it },
+            label = { Text("Place ID") },
+            singleLine = true,
+            modifier = Modifier.weight(1f),
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Button(
+            onClick = { webView?.setSurfaceInteractive(placeId.trim(), true) },
+            enabled = placeId.isNotBlank(),
+        ) {
+            Text("Enable")
+        }
+        Spacer(modifier = Modifier.width(8.dp))
+        Button(
+            onClick = { webView?.setSurfaceInteractive(placeId.trim(), false) },
+            enabled = placeId.isNotBlank(),
+        ) {
+            Text("Disable")
+        }
+    }
 }

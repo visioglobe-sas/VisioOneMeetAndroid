@@ -54,6 +54,11 @@ enum class Feature(
         titleRes = R.string.feature_camera_lock_on_position_title,
         descriptionRes = R.string.feature_camera_lock_on_position_description,
     ),
+    ClickableSurface(
+        slug = "clickable-surface",
+        titleRes = R.string.feature_clickable_surface_title,
+        descriptionRes = R.string.feature_clickable_surface_description,
+    ),
     ;
 
     companion object {
