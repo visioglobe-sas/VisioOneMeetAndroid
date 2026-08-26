@@ -27,4 +27,6 @@
     <string name="feature_camera_lock_on_position_description">Verrouille la caméra sur la position simulée, façon bouton \"recentrer sur moi\" d\'app GPS.</string>
     <string name="feature_clickable_surface_title">Surface cliquable</string>
     <string name="feature_clickable_surface_description">Rend la surface d\'un lieu interactive, avec des couleurs de survol/sélection gérées par le SDK.</string>
+    <string name="feature_custom_data_title">Données personnalisées</string>
+    <string name="feature_custom_data_description">Lire des données métier (prix, horaires, référence) attachées à un POI dans VisioMapEditor.</string>
 </resources>

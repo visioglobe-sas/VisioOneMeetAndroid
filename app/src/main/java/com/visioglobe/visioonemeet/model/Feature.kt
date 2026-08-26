@@ -59,6 +59,11 @@ enum class Feature(
         titleRes = R.string.feature_clickable_surface_title,
         descriptionRes = R.string.feature_clickable_surface_description,
     ),
+    CustomData(
+        slug = "custom-data",
+        titleRes = R.string.feature_custom_data_title,
+        descriptionRes = R.string.feature_custom_data_description,
+    ),
     ;
 
     companion object {

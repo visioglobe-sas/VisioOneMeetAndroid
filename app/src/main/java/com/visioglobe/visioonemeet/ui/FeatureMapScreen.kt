@@ -75,6 +75,10 @@ private sealed interface MapLoadState {
  * `resolvePositions` (`simulated-position`'s POI-id-to-lat/lng lookup) reports its result back via
  * `AndroidBridge.onPositionsResolved`, surfaced to [sheetContent] as its fifth argument. See
  * docs/features/simulated-position.md.
+ *
+ * `loadCustomData` (`custom-data`'s refresh-then-read round trip) reports its result back via
+ * `AndroidBridge.onCustomDataLoaded`, surfaced to [sheetContent] as its sixth argument. See
+ * docs/features/custom-data.md.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -90,6 +94,7 @@ fun FeatureMapScreen(
         floorSelector: FloorSelectorState,
         navigationError: String?,
         positionsResolved: ResolvedPositionsPair?,
+        customDataLoaded: CustomDataResult?,
     ) -> Unit,
 ) {
     var loadState by remember { mutableStateOf<MapLoadState>(MapLoadState.Loading) }
@@ -100,6 +105,7 @@ fun FeatureMapScreen(
     var floorSelector by remember { mutableStateOf(FloorSelectorState()) }
     var navigationError by remember { mutableStateOf<String?>(null) }
     var positionsResolved by remember { mutableStateOf<ResolvedPositionsPair?>(null) }
+    var customDataLoaded by remember { mutableStateOf<CustomDataResult?>(null) }
     val sheetState = rememberModalBottomSheetState()
 
     Scaffold(
@@ -184,6 +190,14 @@ fun FeatureMapScreen(
                                         )
                                     }
                                 },
+                                notifyCustomDataLoaded = { requestId, customDataJson ->
+                                    mainHandler.post {
+                                        customDataLoaded = CustomDataResult(
+                                            requestId = requestId,
+                                            customData = parseCustomDataPayload(customDataJson),
+                                        )
+                                    }
+                                },
                             ),
                             "AndroidBridge",
                         )
@@ -223,7 +237,7 @@ fun FeatureMapScreen(
             sheetState = sheetState,
             containerColor = MaterialTheme.colorScheme.surface,
         ) {
-            sheetContent(webView, lastPoiClick, floorSelector, navigationError, positionsResolved)
+            sheetContent(webView, lastPoiClick, floorSelector, navigationError, positionsResolved, customDataLoaded)
         }
     }
 }
@@ -237,6 +251,7 @@ private class MapBridge(
     private val notifyNavigationComputed: () -> Unit,
     private val notifyNavigationError: (String) -> Unit,
     private val notifyPositionsResolved: (Int, String, String) -> Unit,
+    private val notifyCustomDataLoaded: (Int, String) -> Unit,
 ) {
     @JavascriptInterface
     fun onMapReady() = onReady()
@@ -262,4 +277,8 @@ private class MapBridge(
     @JavascriptInterface
     fun onPositionsResolved(requestId: Int, originJson: String, destinationJson: String) =
         notifyPositionsResolved(requestId, originJson, destinationJson)
+
+    @JavascriptInterface
+    fun onCustomDataLoaded(requestId: Int, customDataJson: String) =
+        notifyCustomDataLoaded(requestId, customDataJson)
 }
