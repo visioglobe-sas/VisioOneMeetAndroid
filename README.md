@@ -55,6 +55,7 @@ Each feature below is a self-contained screen in the app demonstrating one Visio
 - [Camera Lock on Position](docs/features/camera-lock-on-position.md) — lock the camera onto a tracked position via `view.lockCameraPositionOnTracking`.
 - [Clickable Surface](docs/features/clickable-surface.md) — make a POI's surface interactive, with the SDK managing hover/selection colors via `venue.updateSurface()`.
 - [Custom Data](docs/features/custom-data.md) — read business key/value data attached to a POI via `venue.refreshCustomData()` and `venue.getPOICustomData()`.
+- [Category Highlight](docs/features/category-highlight.md) — highlight every POI in a chosen category by combining `venue.categories`/`poi.categories` with `venue.updateSurface()`.
 
 ## How it works
 

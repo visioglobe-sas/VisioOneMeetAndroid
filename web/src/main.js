@@ -22,6 +22,17 @@ let selectedPoi = null;
 // what to remove. See docs/features/compute-navigation.md.
 let currentNavigationTrace = null;
 
+// The category id last highlighted via `highlightCategory`, so
+// `clearCategoryHighlight` knows which POIs' surfaces to revert, and so a
+// second `highlightCategory` call can revert it before highlighting the new
+// selection (only one category highlighted at a time). See
+// docs/features/category-highlight.md.
+let highlightedCategoryId = null;
+
+// Any clearly visible color works here — this isn't an SDK-mandated value,
+// just a demo choice. See docs/features/category-highlight.md.
+const CATEGORY_HIGHLIGHT_COLOR = '#FF6B00';
+
 // Native -> JS bridge: one method per command, called from Kotlin via
 // WebView.evaluateJavascript(). Kotlin JSON-encodes arguments before
 // interpolating them into the generated script call, so what arrives here
@@ -230,6 +241,54 @@ window.MapBridge = {
     const poi = venue.pois.find((p) => p.id === placeId);
     const customData = poi ? venue.getPOICustomData(poi) : null;
     bridge?.onCustomDataLoaded(requestId, JSON.stringify(customData));
+  },
+  // Sends the venue's full category list back to native in one round trip,
+  // requestId echoed back so native can match this response to whichever
+  // call triggered it, same convention as loadCustomData/resolvePositions.
+  // Category is `{ readonly id: string }` — on this shared demo map, `id`
+  // already resolves to a human-readable name (e.g. "Food and Beverage"),
+  // so unlike POI/floor names elsewhere in this file, no Translator lookup
+  // is needed. See docs/features/category-highlight.md.
+  getCategories(requestId) {
+    if (!venue) return;
+    const categories = venue.categories.map((category) => ({ id: category.id }));
+    bridge?.onCategoriesLoaded(requestId, JSON.stringify(categories));
+  },
+  // Highlights every POI belonging to categoryId by recoloring its
+  // surface(s) via venue.updateSurface. There is no dedicated "highlight by
+  // category" SDK method — this is built from the venue.pois /
+  // poi.categories / poi.surfaces primitives. Reverts any previously
+  // highlighted category first (see highlightedCategoryId above), so at
+  // most one category is highlighted at a time. POIs with no surfaces
+  // (e.g. point/marker-only outdoor POIs, `type: -1`) are simply
+  // unaffected — expected, not a bug. See docs/features/category-highlight.md.
+  highlightCategory(categoryId) {
+    if (!venue) return;
+    this.clearCategoryHighlight();
+    venue.pois
+      .filter((poi) => poi.categories.some((category) => category.id === categoryId))
+      .forEach((poi) => {
+        poi.surfaces.forEach((surface) => {
+          venue.updateSurface(surface, { color: CATEGORY_HIGHLIGHT_COLOR });
+        });
+      });
+    highlightedCategoryId = categoryId;
+  },
+  // Reverts the highlight applied by highlightCategory, if any. `'initial'`
+  // (not `undefined`/omitting the key) is the SDK's own documented sentinel
+  // on SurfaceUpdateOptions.color to restore a surface's bundle-defined
+  // color — a no-op omission would not do the same thing. See
+  // docs/features/category-highlight.md.
+  clearCategoryHighlight() {
+    if (!venue || !highlightedCategoryId) return;
+    venue.pois
+      .filter((poi) => poi.categories.some((category) => category.id === highlightedCategoryId))
+      .forEach((poi) => {
+        poi.surfaces.forEach((surface) => {
+          venue.updateSurface(surface, { color: 'initial' });
+        });
+      });
+    highlightedCategoryId = null;
   },
 };
 

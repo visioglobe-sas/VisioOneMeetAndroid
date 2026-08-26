@@ -30,4 +30,6 @@
     <string name="feature_clickable_surface_description">Make a place\'s surface interactive, with SDK-managed hover/selection colors.</string>
     <string name="feature_custom_data_title">Custom data</string>
     <string name="feature_custom_data_description">Read custom business data (price, hours, reference) attached to a POI in VisioMapEditor.</string>
+    <string name="feature_category_highlight_title">Category highlight</string>
+    <string name="feature_category_highlight_description">Highlight every POI belonging to a chosen category, e.g. all restaurants or all shops.</string>
 </resources>
