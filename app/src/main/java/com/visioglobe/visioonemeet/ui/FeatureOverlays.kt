@@ -10,6 +10,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Button
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -210,6 +212,37 @@ private fun WebView.loadCustomData(requestId: Int, placeId: String) {
 }
 
 /**
+ * Requests the venue's full category list in one round trip by calling
+ * `window.MapBridge.getCategories` in the WebView (`venue.categories` under the hood). The result
+ * arrives asynchronously via `AndroidBridge.onCategoriesLoaded`, echoing [requestId] back, same
+ * convention as [WebView.loadCustomData]/[WebView.resolvePositions]. See
+ * docs/features/category-highlight.md.
+ */
+private fun WebView.getCategories(requestId: Int) {
+    val script = "window.MapBridge.getCategories($requestId)"
+    evaluateJavascript(script, null)
+}
+
+/**
+ * Highlights every POI belonging to [categoryId] by calling `window.MapBridge.highlightCategory`
+ * in the WebView (`venue.pois.filter(...)` + `venue.updateSurface` under the hood — there is no
+ * dedicated "highlight by category" SDK method). Fire-and-forget, no response expected, same
+ * convention as [WebView.setSurfaceInteractive]. See docs/features/category-highlight.md.
+ */
+private fun WebView.highlightCategory(categoryId: String) {
+    val script = "window.MapBridge.highlightCategory(${JSONObject.quote(categoryId)})"
+    evaluateJavascript(script, null)
+}
+
+/**
+ * Reverts the highlight applied by [highlightCategory], if any, by calling
+ * `window.MapBridge.clearCategoryHighlight` in the WebView. See docs/features/category-highlight.md.
+ */
+private fun WebView.clearCategoryHighlight() {
+    evaluateJavascript("window.MapBridge.clearCategoryHighlight()", null)
+}
+
+/**
  * Result of a [WebView.loadCustomData] call: [requestId] echoes the value passed to that call, so
  * a stale response can be told apart from the current one, same convention as
  * [ResolvedPositionsPair]. [customData] is `null` when `placeId` didn't resolve to a POI at all
@@ -255,6 +288,31 @@ internal fun parseResolvedPosition(json: String): ResolvedPosition? {
     if (json == "null") return null
     val root = JSONObject(json)
     return ResolvedPosition(latitude = root.getDouble("latitude"), longitude = root.getDouble("longitude"))
+}
+
+/** A single venue category, carried by the `AndroidBridge.onCategoriesLoaded` payload. [id] is the
+ * SDK's raw `Category.id` (a numeric string on the shared demo map, e.g. "1".."11") — used for
+ * filtering/highlighting. [label] is the human-readable name resolved via
+ * `venue.translator.translateCategory()` on the JS side — display only. See
+ * docs/features/category-highlight.md. */
+data class CategoryInfo(val id: String, val label: String)
+
+/**
+ * Result of a [WebView.getCategories] call: [requestId] echoes the value passed to that call, so a
+ * stale response can be told apart from the current one, same convention as [CustomDataResult].
+ */
+data class CategoriesResult(val requestId: Int, val categories: List<CategoryInfo>)
+
+/**
+ * Parses the JSON array argument of `AndroidBridge.onCategoriesLoaded`, e.g.
+ * `[{"id":"5","label":"Food and Beverage"},{"id":"9","label":"Shops"}]`.
+ */
+internal fun parseCategoriesPayload(json: String): List<CategoryInfo> {
+    val array = JSONArray(json)
+    return List(array.length()) { index ->
+        val obj = array.getJSONObject(index)
+        CategoryInfo(id = obj.getString("id"), label = obj.getString("label"))
+    }
 }
 
 /** A single floor of the exposed building, carried by the `AndroidBridge.onFloorsReady` payload. See docs/features/floor-selector.md. */
@@ -903,6 +961,84 @@ fun CustomDataOverlay(webView: WebView?, customDataLoaded: CustomDataResult?) {
                 else -> data.forEach { (key, value) ->
                     Text(text = "$key: $value", style = MaterialTheme.typography.bodyMedium)
                 }
+            }
+        }
+    }
+}
+
+/**
+ * FAB-triggered control for `category-highlight`: one [FilterChip] per `venue.categories` entry
+ * (label = [CategoryInfo.label], the human-readable name resolved via `translateCategory` on the
+ * JS side — [CategoryInfo.id] is the raw identifier used for filtering/highlighting, not display),
+ * requested once via [WebView.getCategories] as soon as the sheet is given a [webView] — `requestId` guards
+ * against a stale response the same way as [CustomDataOverlay]. Tapping a chip calls
+ * [WebView.highlightCategory]; tapping the already-selected chip again, or the "Clear" button
+ * shown below the chips once one is selected, calls [WebView.clearCategoryHighlight] instead. Only
+ * one category is ever selected at a time — [WebView.highlightCategory] itself reverts the
+ * previous selection on the JS side before applying the new one, so this overlay only needs to
+ * track which chip is currently selected for its own rendering. See
+ * docs/features/category-highlight.md.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun CategoryHighlightOverlay(webView: WebView?, categoriesLoaded: CategoriesResult?) {
+    var categories by remember { mutableStateOf<List<CategoryInfo>>(emptyList()) }
+    var pendingRequestId by remember { mutableStateOf<Int?>(null) }
+    var nextRequestId by remember { mutableStateOf(0) }
+    var selectedCategoryId by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(webView) {
+        val view = webView ?: return@LaunchedEffect
+        val requestId = nextRequestId++
+        pendingRequestId = requestId
+        view.getCategories(requestId)
+    }
+
+    LaunchedEffect(categoriesLoaded) {
+        val response = categoriesLoaded ?: return@LaunchedEffect
+        if (response.requestId != pendingRequestId) return@LaunchedEffect
+        pendingRequestId = null
+        categories = response.categories
+    }
+
+    fun toggle(categoryId: String) {
+        if (selectedCategoryId == categoryId) {
+            webView?.clearCategoryHighlight()
+            selectedCategoryId = null
+        } else {
+            webView?.highlightCategory(categoryId)
+            selectedCategoryId = categoryId
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp),
+    ) {
+        if (categories.isEmpty()) {
+            Text("Loading categories…")
+            return@Column
+        }
+        FlowRow(modifier = Modifier.fillMaxWidth()) {
+            categories.forEach { category ->
+                FilterChip(
+                    selected = category.id == selectedCategoryId,
+                    onClick = { toggle(category.id) },
+                    label = { Text(category.label) },
+                    modifier = Modifier.padding(end = 8.dp, bottom = 8.dp),
+                )
+            }
+        }
+        if (selectedCategoryId != null) {
+            Spacer(modifier = Modifier.height(8.dp))
+            OutlinedButton(
+                onClick = {
+                    webView?.clearCategoryHighlight()
+                    selectedCategoryId = null
+                },
+            ) {
+                Text("Clear")
             }
         }
     }

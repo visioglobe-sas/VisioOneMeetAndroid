@@ -64,6 +64,11 @@ enum class Feature(
         titleRes = R.string.feature_custom_data_title,
         descriptionRes = R.string.feature_custom_data_description,
     ),
+    CategoryHighlight(
+        slug = "category-highlight",
+        titleRes = R.string.feature_category_highlight_title,
+        descriptionRes = R.string.feature_category_highlight_description,
+    ),
     ;
 
     companion object {

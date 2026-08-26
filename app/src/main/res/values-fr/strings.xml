@@ -29,4 +29,6 @@
     <string name="feature_clickable_surface_description">Rend la surface d\'un lieu interactive, avec des couleurs de survol/sélection gérées par le SDK.</string>
     <string name="feature_custom_data_title">Données personnalisées</string>
     <string name="feature_custom_data_description">Lire des données métier (prix, horaires, référence) attachées à un POI dans VisioMapEditor.</string>
+    <string name="feature_category_highlight_title">Mise en avant par catégorie</string>
+    <string name="feature_category_highlight_description">Mettre en avant tous les POI d\'une catégorie, ex. tous les restaurants ou toutes les boutiques.</string>
 </resources>
