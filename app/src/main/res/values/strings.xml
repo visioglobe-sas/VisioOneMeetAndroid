@@ -34,4 +34,8 @@
     <string name="feature_category_highlight_description">Highlight every POI belonging to a chosen category, e.g. all restaurants or all shops.</string>
     <string name="feature_dynamic_poi_crud_title">Dynamic POI CRUD</string>
     <string name="feature_dynamic_poi_crud_description">Create, update and remove a POI at runtime, without republishing the map.</string>
+    <string name="feature_runtime_locale_title">Runtime locale</string>
+    <string name="feature_runtime_locale_description">Switch the map\'s displayed language live, without reloading or republishing.</string>
+    <string name="runtime_locale_option_english">English</string>
+    <string name="runtime_locale_option_french">Français</string>
 </resources>

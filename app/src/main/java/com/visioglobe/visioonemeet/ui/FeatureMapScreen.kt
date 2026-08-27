@@ -87,6 +87,10 @@ private sealed interface MapLoadState {
  * `createDynamicPoi` (`dynamic-poi-crud`'s create-then-attach-a-label round trip) reports its
  * result back via `AndroidBridge.onDynamicPoiCreated`, surfaced to [sheetContent] as its eighth
  * argument. See docs/features/dynamic-poi-crud.md.
+ *
+ * `getCurrentLocale`/`setLocale` (`runtime-locale`'s current-locale lookup and locale switch)
+ * both report back via the same `AndroidBridge.onLocaleResolved`, surfaced to [sheetContent] as
+ * its ninth argument. See docs/features/runtime-locale.md.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -105,6 +109,7 @@ fun FeatureMapScreen(
         customDataLoaded: CustomDataResult?,
         categoriesLoaded: CategoriesResult?,
         dynamicPoiCreated: DynamicPoiCreationResult?,
+        localeResolved: LocaleResult?,
     ) -> Unit,
 ) {
     var loadState by remember { mutableStateOf<MapLoadState>(MapLoadState.Loading) }
@@ -118,6 +123,7 @@ fun FeatureMapScreen(
     var customDataLoaded by remember { mutableStateOf<CustomDataResult?>(null) }
     var categoriesLoaded by remember { mutableStateOf<CategoriesResult?>(null) }
     var dynamicPoiCreated by remember { mutableStateOf<DynamicPoiCreationResult?>(null) }
+    var localeResolved by remember { mutableStateOf<LocaleResult?>(null) }
     val sheetState = rememberModalBottomSheetState()
 
     Scaffold(
@@ -223,6 +229,11 @@ fun FeatureMapScreen(
                                         dynamicPoiCreated = parseDynamicPoiCreationPayload(requestId, resultJson)
                                     }
                                 },
+                                notifyLocaleResolved = { requestId, resultJson ->
+                                    mainHandler.post {
+                                        localeResolved = parseLocaleResultPayload(requestId, resultJson)
+                                    }
+                                },
                             ),
                             "AndroidBridge",
                         )
@@ -271,6 +282,7 @@ fun FeatureMapScreen(
                 customDataLoaded,
                 categoriesLoaded,
                 dynamicPoiCreated,
+                localeResolved,
             )
         }
     }
@@ -288,6 +300,7 @@ private class MapBridge(
     private val notifyCustomDataLoaded: (Int, String) -> Unit,
     private val notifyCategoriesLoaded: (Int, String) -> Unit,
     private val notifyDynamicPoiCreated: (Int, String) -> Unit,
+    private val notifyLocaleResolved: (Int, String) -> Unit,
 ) {
     @JavascriptInterface
     fun onMapReady() = onReady()
@@ -325,4 +338,8 @@ private class MapBridge(
     @JavascriptInterface
     fun onDynamicPoiCreated(requestId: Int, resultJson: String) =
         notifyDynamicPoiCreated(requestId, resultJson)
+
+    @JavascriptInterface
+    fun onLocaleResolved(requestId: Int, resultJson: String) =
+        notifyLocaleResolved(requestId, resultJson)
 }
