@@ -14,6 +14,7 @@ import com.visioglobe.visioonemeet.ui.CategoryHighlightOverlay
 import com.visioglobe.visioonemeet.ui.ClickableSurfaceOverlay
 import com.visioglobe.visioonemeet.ui.ComputeNavigationOverlay
 import com.visioglobe.visioonemeet.ui.CustomDataOverlay
+import com.visioglobe.visioonemeet.ui.DynamicPoiCrudOverlay
 import com.visioglobe.visioonemeet.ui.FeatureMapScreen
 import com.visioglobe.visioonemeet.ui.FeatureMenuScreen
 import com.visioglobe.visioonemeet.ui.FloorSelectorOverlay
@@ -56,7 +57,7 @@ class MainActivity : ComponentActivity() {
                             modifier = Modifier.fillMaxSize(),
                             reactsToPoiClicks = feature == Feature.PoiClick,
                             onBack = { navController.popBackStack() },
-                            sheetContent = { webView, lastPoiClick, floorSelector, navigationError, positionsResolved, customDataLoaded, categoriesLoaded ->
+                            sheetContent = { webView, lastPoiClick, floorSelector, navigationError, positionsResolved, customDataLoaded, categoriesLoaded, dynamicPoiCreated ->
                                 when (feature) {
                                     Feature.ResetView -> ResetViewOverlay(webView)
                                     Feature.OccupancySimulated -> OccupancySimulationOverlay(webView)
@@ -71,6 +72,7 @@ class MainActivity : ComponentActivity() {
                                     Feature.ClickableSurface -> ClickableSurfaceOverlay(webView)
                                     Feature.CustomData -> CustomDataOverlay(webView, customDataLoaded)
                                     Feature.CategoryHighlight -> CategoryHighlightOverlay(webView, categoriesLoaded)
+                                    Feature.DynamicPoiCrud -> DynamicPoiCrudOverlay(webView, dynamicPoiCreated)
                                     null -> Unit
                                 }
                             },

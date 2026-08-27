@@ -243,6 +243,42 @@ private fun WebView.clearCategoryHighlight() {
 }
 
 /**
+ * Creates a POI at runtime and attaches a Label to it (copying its position from [anchorId]'s own
+ * first label/marker/image) by calling `window.MapBridge.createDynamicPoi` in the WebView
+ * (`venue.createPOI` + `venue.createLabel` under the hood). The result — success, or one of the
+ * "anchor not found"/"anchor has no position"/"duplicate id" normal-state outcomes — arrives
+ * asynchronously via `AndroidBridge.onDynamicPoiCreated`, echoing [requestId] back, same convention
+ * as [WebView.loadCustomData]/[WebView.getCategories]. See docs/features/dynamic-poi-crud.md.
+ */
+private fun WebView.createDynamicPoi(requestId: Int, newId: String, anchorId: String, labelText: String) {
+    val script = "window.MapBridge.createDynamicPoi(" +
+        "$requestId, ${JSONObject.quote(newId)}, ${JSONObject.quote(anchorId)}, ${JSONObject.quote(labelText)})"
+    evaluateJavascript(script, null)
+}
+
+/**
+ * Updates the tracked dynamic POI's label text by calling `window.MapBridge.updateDynamicPoiLabel`
+ * in the WebView (`venue.updateLabel` under the hood) — the actual "modify" story for a dynamic
+ * POI, since `venue.updatePOI` itself can only change categories, never anything visual.
+ * Fire-and-forget, no response expected, same convention as [WebView.highlightCategory]. See
+ * docs/features/dynamic-poi-crud.md.
+ */
+private fun WebView.updateDynamicPoiLabel(text: String) {
+    val script = "window.MapBridge.updateDynamicPoiLabel(${JSONObject.quote(text)})"
+    evaluateJavascript(script, null)
+}
+
+/**
+ * Removes the tracked dynamic POI by calling `window.MapBridge.removeDynamicPoi` in the WebView
+ * (`venue.removePOI` under the hood, which cascades to remove the attached label from the view
+ * too — no separate label removal needed). Fire-and-forget, no response expected. See
+ * docs/features/dynamic-poi-crud.md.
+ */
+private fun WebView.removeDynamicPoi() {
+    evaluateJavascript("window.MapBridge.removeDynamicPoi()", null)
+}
+
+/**
  * Result of a [WebView.loadCustomData] call: [requestId] echoes the value passed to that call, so
  * a stale response can be told apart from the current one, same convention as
  * [ResolvedPositionsPair]. [customData] is `null` when `placeId` didn't resolve to a POI at all
@@ -313,6 +349,38 @@ internal fun parseCategoriesPayload(json: String): List<CategoryInfo> {
         val obj = array.getJSONObject(index)
         CategoryInfo(id = obj.getString("id"), label = obj.getString("label"))
     }
+}
+
+/**
+ * Result of a [WebView.createDynamicPoi] call, carried by `AndroidBridge.onDynamicPoiCreated`.
+ * [requestId] echoes the value passed to that call, same convention as [CustomDataResult]/
+ * [CategoriesResult]. [status] is one of: `"created"` ([id]/[text] then non-null — the tracked
+ * POI's id and its label's text), `"anchor-not-found"` (the anchor Place ID doesn't resolve to a
+ * POI), `"anchor-has-no-position"` (the anchor POI has no label/marker/image to copy a position
+ * from), `"duplicate-id"` (`venue.createPOI` threw `POIAlreadyExistsError`), or `"error"` (any
+ * other failure, [message] carrying its text). See docs/features/dynamic-poi-crud.md.
+ */
+data class DynamicPoiCreationResult(
+    val requestId: Int,
+    val status: String,
+    val id: String? = null,
+    val text: String? = null,
+    val message: String? = null,
+)
+
+/**
+ * Parses the JSON object argument of `AndroidBridge.onDynamicPoiCreated`, e.g.
+ * `{"status":"created","id":"demo-poi-1","text":"New POI"}` or `{"status":"anchor-not-found"}`.
+ */
+internal fun parseDynamicPoiCreationPayload(requestId: Int, json: String): DynamicPoiCreationResult {
+    val root = JSONObject(json)
+    return DynamicPoiCreationResult(
+        requestId = requestId,
+        status = root.getString("status"),
+        id = if (root.has("id")) root.getString("id") else null,
+        text = if (root.has("text")) root.getString("text") else null,
+        message = if (root.has("message")) root.getString("message") else null,
+    )
 }
 
 /** A single floor of the exposed building, carried by the `AndroidBridge.onFloorsReady` payload. See docs/features/floor-selector.md. */
@@ -1040,6 +1108,145 @@ fun CategoryHighlightOverlay(webView: WebView?, categoriesLoaded: CategoriesResu
             ) {
                 Text("Clear")
             }
+        }
+    }
+}
+
+/**
+ * Turns a [DynamicPoiCreationResult.status] other than `"created"` into a human-readable message
+ * for [DynamicPoiCrudOverlay] to show in place of the "Created: …" state.
+ */
+private fun DynamicPoiCreationResult.errorMessageOrNull(): String? = when (status) {
+    "anchor-not-found" -> "Anchor POI not found."
+    "anchor-has-no-position" -> "This POI has no position to copy — pick a different anchor."
+    "duplicate-id" -> "A POI with this ID already exists — pick a different New POI ID."
+    "created" -> null
+    else -> message ?: "Could not create the POI."
+}
+
+/**
+ * FAB-triggered control for `dynamic-poi-crud`: "New POI ID", "Anchor POI ID" and "Label text"
+ * fields plus Create/Update text/Remove buttons. Only one dynamic POI is tracked at a time — a
+ * demo-side simplification, not an SDK limitation — so the two ID fields are disabled once one is
+ * tracked, same "disable during a running state" idiom as
+ * [TrackedPositionSimulationControls]'s ID fields. "Label text" stays editable throughout: it seeds
+ * the label created by Create, and its current value is what Update text sends via
+ * [WebView.updateDynamicPoiLabel] — the same field serves both actions, per the feature's design.
+ * Create calls [WebView.createDynamicPoi] and waits for `AndroidBridge.onDynamicPoiCreated`
+ * (`requestId` guards against a stale response the same way as [CustomDataOverlay]); its `"created"`
+ * result seeds [trackedPoiId]/[trackedLabelText], any other status surfaces as a normal state via
+ * [errorMessageOrNull] rather than a crash — including `POIAlreadyExistsError` on a duplicate New
+ * POI ID. Remove calls [WebView.removeDynamicPoi] and clears all local tracking state; the SDK
+ * itself cascades the removal to the attached label, no separate cleanup call needed here. See
+ * docs/features/dynamic-poi-crud.md.
+ */
+@Composable
+fun DynamicPoiCrudOverlay(webView: WebView?, dynamicPoiCreated: DynamicPoiCreationResult?) {
+    var newId by remember { mutableStateOf("") }
+    var anchorId by remember { mutableStateOf("") }
+    var labelText by remember { mutableStateOf("") }
+    var trackedPoiId by remember { mutableStateOf<String?>(null) }
+    var trackedLabelText by remember { mutableStateOf<String?>(null) }
+    var pendingRequestId by remember { mutableStateOf<Int?>(null) }
+    var nextRequestId by remember { mutableStateOf(0) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(dynamicPoiCreated) {
+        val response = dynamicPoiCreated ?: return@LaunchedEffect
+        if (response.requestId != pendingRequestId) return@LaunchedEffect
+        pendingRequestId = null
+        val error = response.errorMessageOrNull()
+        if (error != null) {
+            errorMessage = error
+        } else {
+            errorMessage = null
+            trackedPoiId = response.id
+            trackedLabelText = response.text
+        }
+    }
+
+    val hasTrackedPoi = trackedPoiId != null
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp),
+    ) {
+        Text(
+            text = if (hasTrackedPoi) {
+                "Created: `$trackedPoiId` — \"$trackedLabelText\""
+            } else {
+                "No dynamic POI created yet."
+            },
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+        Row(modifier = Modifier.fillMaxWidth()) {
+            OutlinedTextField(
+                value = newId,
+                onValueChange = { newId = it },
+                label = { Text("New POI ID") },
+                singleLine = true,
+                enabled = !hasTrackedPoi,
+                modifier = Modifier.weight(1f),
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            OutlinedTextField(
+                value = anchorId,
+                onValueChange = { anchorId = it },
+                label = { Text("Anchor POI ID") },
+                singleLine = true,
+                enabled = !hasTrackedPoi,
+                modifier = Modifier.weight(1f),
+            )
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        OutlinedTextField(
+            value = labelText,
+            onValueChange = { labelText = it },
+            label = { Text("Label text") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Row(modifier = Modifier.fillMaxWidth()) {
+            Button(
+                onClick = {
+                    errorMessage = null
+                    val requestId = nextRequestId++
+                    pendingRequestId = requestId
+                    webView?.createDynamicPoi(requestId, newId.trim(), anchorId.trim(), labelText.trim())
+                },
+                enabled = !hasTrackedPoi && newId.isNotBlank() && anchorId.isNotBlank() && labelText.isNotBlank(),
+            ) {
+                Text("Create")
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            Button(
+                onClick = {
+                    webView?.updateDynamicPoiLabel(labelText.trim())
+                    trackedLabelText = labelText.trim()
+                },
+                enabled = hasTrackedPoi && labelText.isNotBlank(),
+            ) {
+                Text("Update text")
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            Button(
+                onClick = {
+                    webView?.removeDynamicPoi()
+                    trackedPoiId = null
+                    trackedLabelText = null
+                    errorMessage = null
+                },
+                enabled = hasTrackedPoi,
+            ) {
+                Text("Remove")
+            }
+        }
+        if (errorMessage != null) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(text = errorMessage.orEmpty(), color = MaterialTheme.colorScheme.error)
         }
     }
 }

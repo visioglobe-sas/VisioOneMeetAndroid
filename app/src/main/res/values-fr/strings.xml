@@ -31,4 +31,6 @@
     <string name="feature_custom_data_description">Lire des données métier (prix, horaires, référence) attachées à un POI dans VisioMapEditor.</string>
     <string name="feature_category_highlight_title">Mise en avant par catégorie</string>
     <string name="feature_category_highlight_description">Mettre en avant tous les POI d\'une catégorie, ex. tous les restaurants ou toutes les boutiques.</string>
+    <string name="feature_dynamic_poi_crud_title">CRUD de POI dynamique</string>
+    <string name="feature_dynamic_poi_crud_description">Créer, modifier et supprimer un POI à la volée, sans republier la carte.</string>
 </resources>

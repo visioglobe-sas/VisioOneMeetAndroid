@@ -69,6 +69,11 @@ enum class Feature(
         titleRes = R.string.feature_category_highlight_title,
         descriptionRes = R.string.feature_category_highlight_description,
     ),
+    DynamicPoiCrud(
+        slug = "dynamic-poi-crud",
+        titleRes = R.string.feature_dynamic_poi_crud_title,
+        descriptionRes = R.string.feature_dynamic_poi_crud_description,
+    ),
     ;
 
     companion object {
