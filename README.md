@@ -57,6 +57,7 @@ Each feature below is a self-contained screen in the app demonstrating one Visio
 - [Custom Data](docs/features/custom-data.md) — read business key/value data attached to a POI via `venue.refreshCustomData()` and `venue.getPOICustomData()`.
 - [Category Highlight](docs/features/category-highlight.md) — highlight every POI in a chosen category by combining `venue.categories`/`poi.categories` with `venue.updateSurface()`.
 - [Dynamic POI CRUD](docs/features/dynamic-poi-crud.md) — create, update and remove a POI at runtime via `venue.createPOI()`/`venue.createLabel()`/`venue.updateLabel()`/`venue.removePOI()`, without republishing the map.
+- [Runtime Locale](docs/features/runtime-locale.md) — switch the map's displayed language live via `venue.setCurrentLocale()`, without reloading or republishing.
 
 ## How it works
 

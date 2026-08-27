@@ -33,4 +33,8 @@
     <string name="feature_category_highlight_description">Mettre en avant tous les POI d\'une catégorie, ex. tous les restaurants ou toutes les boutiques.</string>
     <string name="feature_dynamic_poi_crud_title">CRUD de POI dynamique</string>
     <string name="feature_dynamic_poi_crud_description">Créer, modifier et supprimer un POI à la volée, sans republier la carte.</string>
+    <string name="feature_runtime_locale_title">Langue à la volée</string>
+    <string name="feature_runtime_locale_description">Change la langue affichée sur la carte en direct, sans recharger ni republier.</string>
+    <string name="runtime_locale_option_english">English</string>
+    <string name="runtime_locale_option_french">Français</string>
 </resources>

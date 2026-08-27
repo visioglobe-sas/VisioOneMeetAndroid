@@ -74,6 +74,11 @@ enum class Feature(
         titleRes = R.string.feature_dynamic_poi_crud_title,
         descriptionRes = R.string.feature_dynamic_poi_crud_description,
     ),
+    RuntimeLocale(
+        slug = "runtime-locale",
+        titleRes = R.string.feature_runtime_locale_title,
+        descriptionRes = R.string.feature_runtime_locale_description,
+    ),
     ;
 
     companion object {

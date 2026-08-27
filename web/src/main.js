@@ -367,6 +367,41 @@ window.MapBridge = {
     dynamicPoi = null;
     dynamicLabel = null;
   },
+  // Reports the venue's currentLocale back to native in one round trip, so
+  // the runtime-locale sheet can highlight whichever option is already
+  // active when it opens. There is no locale-change event to listen for
+  // instead, so this is only ever called once, right when the sheet is
+  // shown. Same requestId-echo convention as getCategories/loadCustomData,
+  // reusing the { status, locale } shape of setLocale below so native can
+  // share one response parser for both. See docs/features/runtime-locale.md.
+  getCurrentLocale(requestId) {
+    if (!venue) return;
+    bridge?.onLocaleResolved(requestId, JSON.stringify({ status: 'ok', locale: venue.currentLocale }));
+  },
+  // Switches the map's displayed language via venue.setCurrentLocale, which
+  // re-renders POI/label names (and the current View's UI/Navigation) with
+  // the new locale by itself — no manual re-fetch of POI data needed, per
+  // the SDK's own Venue.ts TSDoc on setCurrentLocale/currentLocale. It is
+  // Promise-based, so the resolved locale is only reported back to native
+  // (onLocaleResolved, requestId echoed) once the switch actually completes,
+  // same "wait for the async result" idiom as loadCustomData/
+  // createDynamicPoi. In this SDK version setCurrentLocale never rejects —
+  // it does not validate locale against venue.translator.allLocales, it just
+  // sets currentLocale and re-renders — but the try/catch is kept for
+  // forward-compatibility, same defensive pattern as computeNavigation. See
+  // docs/features/runtime-locale.md.
+  async setLocale(requestId, locale) {
+    if (!venue) return;
+    try {
+      await venue.setCurrentLocale(locale);
+      bridge?.onLocaleResolved(requestId, JSON.stringify({ status: 'ok', locale: venue.currentLocale }));
+    } catch (error) {
+      bridge?.onLocaleResolved(
+        requestId,
+        JSON.stringify({ status: 'error', message: String(error?.message ?? error) }),
+      );
+    }
+  },
 };
 
 // Builds the payload sent to native for the floor-selector UI: the

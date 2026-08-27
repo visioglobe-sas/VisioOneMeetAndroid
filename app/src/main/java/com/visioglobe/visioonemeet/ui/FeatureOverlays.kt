@@ -279,6 +279,31 @@ private fun WebView.removeDynamicPoi() {
 }
 
 /**
+ * Requests the venue's current locale in one round trip by calling
+ * `window.MapBridge.getCurrentLocale` in the WebView (`venue.currentLocale` under the hood). The
+ * result arrives asynchronously via `AndroidBridge.onLocaleResolved`, echoing [requestId] back,
+ * same convention as [WebView.getCategories]/[WebView.loadCustomData] — and shared with
+ * [WebView.setLocale] below, since both report the same `{status, locale}` shape. See
+ * docs/features/runtime-locale.md.
+ */
+private fun WebView.getCurrentLocale(requestId: Int) {
+    val script = "window.MapBridge.getCurrentLocale($requestId)"
+    evaluateJavascript(script, null)
+}
+
+/**
+ * Switches the map's displayed language to [locale] by calling `window.MapBridge.setLocale` in
+ * the WebView (`venue.setCurrentLocale(locale): Promise<void>` under the hood — the SDK re-renders
+ * labels/UI itself, no manual re-fetch needed). The result arrives asynchronously via
+ * `AndroidBridge.onLocaleResolved`, echoing [requestId] back, same convention as
+ * [WebView.getCurrentLocale]. See docs/features/runtime-locale.md.
+ */
+private fun WebView.setLocale(requestId: Int, locale: String) {
+    val script = "window.MapBridge.setLocale($requestId, ${JSONObject.quote(locale)})"
+    evaluateJavascript(script, null)
+}
+
+/**
  * Result of a [WebView.loadCustomData] call: [requestId] echoes the value passed to that call, so
  * a stale response can be told apart from the current one, same convention as
  * [ResolvedPositionsPair]. [customData] is `null` when `placeId` didn't resolve to a POI at all
@@ -348,6 +373,32 @@ internal fun parseCategoriesPayload(json: String): List<CategoryInfo> {
     return List(array.length()) { index ->
         val obj = array.getJSONObject(index)
         CategoryInfo(id = obj.getString("id"), label = obj.getString("label"))
+    }
+}
+
+/**
+ * Result of a [WebView.getCurrentLocale] or [WebView.setLocale] call, carried by
+ * `AndroidBridge.onLocaleResolved`. [requestId] echoes the value passed to that call, same
+ * convention as [CategoriesResult]/[CustomDataResult]. [locale] is the venue's resulting current
+ * locale (e.g. `"en"`, `"fr"`) on success, `null` on failure, with [errorMessage] then carrying its
+ * text. See docs/features/runtime-locale.md.
+ */
+data class LocaleResult(val requestId: Int, val locale: String?, val errorMessage: String?)
+
+/**
+ * Parses the JSON object argument of `AndroidBridge.onLocaleResolved`, e.g.
+ * `{"status":"ok","locale":"en"}` or `{"status":"error","message":"..."}`.
+ */
+internal fun parseLocaleResultPayload(requestId: Int, json: String): LocaleResult {
+    val root = JSONObject(json)
+    return if (root.getString("status") == "ok") {
+        LocaleResult(requestId = requestId, locale = root.getString("locale"), errorMessage = null)
+    } else {
+        LocaleResult(
+            requestId = requestId,
+            locale = null,
+            errorMessage = root.optString("message", "Could not change locale."),
+        )
     }
 }
 
@@ -1242,6 +1293,92 @@ fun DynamicPoiCrudOverlay(webView: WebView?, dynamicPoiCreated: DynamicPoiCreati
                 enabled = hasTrackedPoi,
             ) {
                 Text("Remove")
+            }
+        }
+        if (errorMessage != null) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(text = errorMessage.orEmpty(), color = MaterialTheme.colorScheme.error)
+        }
+    }
+}
+
+/**
+ * The two locale options offered by `runtime-locale`, paired with a human-readable label. The
+ * shared demo map's `venue.translator.allLocales` is actually `['default', 'en', 'fr']`, but
+ * `'default'` is a byte-identical duplicate of `'fr'` on this venue (confirmed against the
+ * published map payload) — offering it as a third, seemingly distinct choice would be misleading,
+ * so only these two SDK-valid locale codes are hardcoded here rather than populated from
+ * `allLocales` at runtime. See docs/features/runtime-locale.md.
+ */
+private val RUNTIME_LOCALE_OPTIONS = listOf(
+    "en" to R.string.runtime_locale_option_english,
+    "fr" to R.string.runtime_locale_option_french,
+)
+
+/**
+ * FAB-triggered control for `runtime-locale`: one button per [RUNTIME_LOCALE_OPTIONS] entry. The
+ * venue's current locale is queried once via [WebView.getCurrentLocale] as soon as the sheet is
+ * given a [webView] — `requestId` guards against a stale response the same way as
+ * [CategoryHighlightOverlay] — and rendered as a filled, disabled [Button] (same "current state"
+ * styling as [FloorSelectorOverlay]'s current floor); the other option is an [OutlinedButton].
+ * Tapping the non-active option calls [WebView.setLocale], which switches `venue.currentLocale`
+ * and re-renders every POI/label name and UI item already on screen — no separate refresh call
+ * needed, per the SDK's own `Venue.setCurrentLocale` TSDoc. Both calls funnel through the same
+ * `AndroidBridge.onLocaleResolved` callback ([localeResolved]), so a switch that somehow fails
+ * surfaces [errorMessage] below the buttons instead of leaving the sheet showing a stale locale.
+ * See docs/features/runtime-locale.md.
+ */
+@Composable
+fun RuntimeLocaleOverlay(webView: WebView?, localeResolved: LocaleResult?) {
+    var currentLocale by remember { mutableStateOf<String?>(null) }
+    var pendingRequestId by remember { mutableStateOf<Int?>(null) }
+    var nextRequestId by remember { mutableStateOf(0) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(webView) {
+        val view = webView ?: return@LaunchedEffect
+        val requestId = nextRequestId++
+        pendingRequestId = requestId
+        view.getCurrentLocale(requestId)
+    }
+
+    LaunchedEffect(localeResolved) {
+        val response = localeResolved ?: return@LaunchedEffect
+        if (response.requestId != pendingRequestId) return@LaunchedEffect
+        pendingRequestId = null
+        if (response.locale != null) {
+            currentLocale = response.locale
+            errorMessage = null
+        } else {
+            errorMessage = response.errorMessage
+        }
+    }
+
+    fun select(locale: String) {
+        errorMessage = null
+        val requestId = nextRequestId++
+        pendingRequestId = requestId
+        webView?.setLocale(requestId, locale)
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp),
+    ) {
+        RUNTIME_LOCALE_OPTIONS.forEach { (locale, labelRes) ->
+            val isCurrent = locale == currentLocale
+            val buttonModifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 4.dp)
+            if (isCurrent) {
+                Button(onClick = {}, enabled = false, modifier = buttonModifier) {
+                    Text(stringResource(labelRes))
+                }
+            } else {
+                OutlinedButton(onClick = { select(locale) }, modifier = buttonModifier) {
+                    Text(stringResource(labelRes))
+                }
             }
         }
         if (errorMessage != null) {

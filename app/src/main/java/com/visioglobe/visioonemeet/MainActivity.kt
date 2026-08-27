@@ -22,6 +22,7 @@ import com.visioglobe.visioonemeet.ui.GoToPoiOverlay
 import com.visioglobe.visioonemeet.ui.OccupancySimulationOverlay
 import com.visioglobe.visioonemeet.ui.PoiClickOverlay
 import com.visioglobe.visioonemeet.ui.ResetViewOverlay
+import com.visioglobe.visioonemeet.ui.RuntimeLocaleOverlay
 import com.visioglobe.visioonemeet.ui.SimulatedPositionOverlay
 import com.visioglobe.visioonemeet.ui.UiPartVisibilityOverlay
 import com.visioglobe.visioonemeet.ui.theme.VisioOneMeetTheme
@@ -57,7 +58,7 @@ class MainActivity : ComponentActivity() {
                             modifier = Modifier.fillMaxSize(),
                             reactsToPoiClicks = feature == Feature.PoiClick,
                             onBack = { navController.popBackStack() },
-                            sheetContent = { webView, lastPoiClick, floorSelector, navigationError, positionsResolved, customDataLoaded, categoriesLoaded, dynamicPoiCreated ->
+                            sheetContent = { webView, lastPoiClick, floorSelector, navigationError, positionsResolved, customDataLoaded, categoriesLoaded, dynamicPoiCreated, localeResolved ->
                                 when (feature) {
                                     Feature.ResetView -> ResetViewOverlay(webView)
                                     Feature.OccupancySimulated -> OccupancySimulationOverlay(webView)
@@ -73,6 +74,7 @@ class MainActivity : ComponentActivity() {
                                     Feature.CustomData -> CustomDataOverlay(webView, customDataLoaded)
                                     Feature.CategoryHighlight -> CategoryHighlightOverlay(webView, categoriesLoaded)
                                     Feature.DynamicPoiCrud -> DynamicPoiCrudOverlay(webView, dynamicPoiCreated)
+                                    Feature.RuntimeLocale -> RuntimeLocaleOverlay(webView, localeResolved)
                                     null -> Unit
                                 }
                             },
