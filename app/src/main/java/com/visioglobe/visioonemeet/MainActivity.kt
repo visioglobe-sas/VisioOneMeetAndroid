@@ -15,6 +15,7 @@ import com.visioglobe.visioonemeet.ui.ClickableSurfaceOverlay
 import com.visioglobe.visioonemeet.ui.ComputeNavigationOverlay
 import com.visioglobe.visioonemeet.ui.CustomDataOverlay
 import com.visioglobe.visioonemeet.ui.DynamicPoiCrudOverlay
+import com.visioglobe.visioonemeet.ui.ExploreModeOverlay
 import com.visioglobe.visioonemeet.ui.FeatureMapScreen
 import com.visioglobe.visioonemeet.ui.FeatureMenuScreen
 import com.visioglobe.visioonemeet.ui.FloorSelectorOverlay
@@ -68,25 +69,31 @@ class MainActivity : ComponentActivity() {
                                 }
                             },
                             onBack = { navController.popBackStack() },
-                            sheetContent = { webView, lastPoiClick, floorSelector, navigationError, positionsResolved, customDataLoaded, categoriesLoaded, dynamicPoiCreated, localeResolved ->
+                            sheetContent = { webView, bridgeState ->
                                 when (feature) {
                                     Feature.ResetView -> ResetViewOverlay(webView)
                                     Feature.OccupancySimulated -> OccupancySimulationOverlay(webView)
-                                    Feature.PoiClick -> PoiClickOverlay(lastPoiClick)
+                                    Feature.PoiClick -> PoiClickOverlay(bridgeState.lastPoiClick)
                                     Feature.GoToPoi -> GoToPoiOverlay(webView)
-                                    Feature.FloorSelector -> FloorSelectorOverlay(webView, floorSelector)
-                                    Feature.ComputeNavigation -> ComputeNavigationOverlay(webView, navigationError)
+                                    Feature.FloorSelector -> FloorSelectorOverlay(webView, bridgeState.floorSelector)
+                                    Feature.ComputeNavigation ->
+                                        ComputeNavigationOverlay(webView, bridgeState.navigationError)
                                     Feature.UiPartVisibility -> UiPartVisibilityOverlay(webView)
                                     Feature.NativeUiReplacement ->
-                                        NativeUiReplacementOverlay(webView, floorSelector)
-                                    Feature.SimulatedPosition -> SimulatedPositionOverlay(webView, positionsResolved)
+                                        NativeUiReplacementOverlay(webView, bridgeState.floorSelector)
+                                    Feature.SimulatedPosition ->
+                                        SimulatedPositionOverlay(webView, bridgeState.positionsResolved)
                                     Feature.CameraLockOnPosition ->
-                                        CameraLockOnPositionOverlay(webView, positionsResolved)
+                                        CameraLockOnPositionOverlay(webView, bridgeState.positionsResolved)
                                     Feature.ClickableSurface -> ClickableSurfaceOverlay(webView)
-                                    Feature.CustomData -> CustomDataOverlay(webView, customDataLoaded)
-                                    Feature.CategoryHighlight -> CategoryHighlightOverlay(webView, categoriesLoaded)
-                                    Feature.DynamicPoiCrud -> DynamicPoiCrudOverlay(webView, dynamicPoiCreated)
-                                    Feature.RuntimeLocale -> RuntimeLocaleOverlay(webView, localeResolved)
+                                    Feature.CustomData -> CustomDataOverlay(webView, bridgeState.customDataLoaded)
+                                    Feature.CategoryHighlight ->
+                                        CategoryHighlightOverlay(webView, bridgeState.categoriesLoaded)
+                                    Feature.DynamicPoiCrud ->
+                                        DynamicPoiCrudOverlay(webView, bridgeState.dynamicPoiCreated)
+                                    Feature.RuntimeLocale -> RuntimeLocaleOverlay(webView, bridgeState.localeResolved)
+                                    Feature.ExploreMode ->
+                                        ExploreModeOverlay(webView, bridgeState.currentExploreMode)
                                     null -> Unit
                                 }
                             },

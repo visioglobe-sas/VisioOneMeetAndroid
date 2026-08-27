@@ -40,4 +40,9 @@
     <string name="feature_runtime_locale_description">Change la langue affichée sur la carte en direct, sans recharger ni republier.</string>
     <string name="runtime_locale_option_english">English</string>
     <string name="runtime_locale_option_french">Français</string>
+    <string name="feature_explore_mode_title">Mode d\'exploration</string>
+    <string name="feature_explore_mode_description">Bascule entre la vue globale, la vue éclatée par bâtiment et la vue par étage.</string>
+    <string name="explore_mode_option_global">Global</string>
+    <string name="explore_mode_option_building">Bâtiment</string>
+    <string name="explore_mode_option_floor">Étage</string>
 </resources>
