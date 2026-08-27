@@ -46,6 +46,29 @@ private sealed interface MapLoadState {
 }
 
 /**
+ * Every piece of state the JS bridge can report back asynchronously, bundled into one value handed
+ * to [FeatureMapScreen]'s [sheetContent] — see that parameter's kdoc for what feeds each field.
+ *
+ * This is a single data class rather than one [sheetContent] parameter per field (which is how it
+ * used to be) because the Compose compiler's parameter-packing for `@Composable` function *types*
+ * breaks down past 9 parameters — a 10-parameter `sheetContent` lambda fails IR lowering with
+ * `Function with 11 params had 1 changed params but expected 2` (a real compiler bug, not a
+ * project-side mistake; confirmed by reverting to 9 params and rebuilding successfully). Bundling
+ * keeps [sheetContent] at a fixed 2 parameters no matter how many features are added later.
+ */
+data class FeatureBridgeState(
+    val lastPoiClick: List<PoiClickInfo> = emptyList(),
+    val floorSelector: FloorSelectorState = FloorSelectorState(),
+    val navigationError: String? = null,
+    val positionsResolved: ResolvedPositionsPair? = null,
+    val customDataLoaded: CustomDataResult? = null,
+    val categoriesLoaded: CategoriesResult? = null,
+    val dynamicPoiCreated: DynamicPoiCreationResult? = null,
+    val localeResolved: LocaleResult? = null,
+    val currentExploreMode: String? = null,
+)
+
+/**
  * Hosts the VisioOne JS SDK inside a WebView. The SDK is bundled with Vite (see /web) and
  * served from the app's assets through [WebViewAssetLoader], which exposes it on a synthetic
  * https:// origin instead of file:// so ES module imports resolve without CORS issues.
@@ -58,39 +81,45 @@ private sealed interface MapLoadState {
  * The web bundle always forwards the SDK's `poiclick` event to `AndroidBridge.onPoiClick`
  * (see `web/src/main.js`), but only a screen that opts in with [reactsToPoiClicks] acts on it:
  * it auto-opens the modal bottom sheet (same as tapping the FAB) and hands the parsed POIs to
- * [sheetContent] as its second argument. Other screens simply ignore the event, so tapping a POI
- * on, say, the reset-view screen has no side effect. See docs/features/poi-click.md.
+ * [sheetContent] via [FeatureBridgeState.lastPoiClick]. Other screens simply ignore the event, so
+ * tapping a POI on, say, the reset-view screen has no side effect. See docs/features/poi-click.md.
  *
  * The web bundle also always pushes the current building's floors once via
  * `AndroidBridge.onFloorsReady`, then keeps the active one in sync via
  * `AndroidBridge.onFloorChanged` (see `web/src/main.js`). Unlike POI clicks, this never
- * auto-opens the sheet — it is handed to [sheetContent] as its third argument for whichever
- * screen wants to render it. See docs/features/floor-selector.md.
+ * auto-opens the sheet — it is handed to [sheetContent] via [FeatureBridgeState.floorSelector] for
+ * whichever screen wants to render it. See docs/features/floor-selector.md.
  *
  * `computeNavigation` failures (bad/unreachable Place IDs) are reported back via
- * `AndroidBridge.onNavigationError`, surfaced to [sheetContent] as its fourth argument; a
+ * `AndroidBridge.onNavigationError`, surfaced via [FeatureBridgeState.navigationError]; a
  * subsequent successful computation clears it via `AndroidBridge.onNavigationComputed`. See
  * docs/features/compute-navigation.md.
  *
  * `resolvePositions` (`simulated-position`'s POI-id-to-lat/lng lookup) reports its result back via
- * `AndroidBridge.onPositionsResolved`, surfaced to [sheetContent] as its fifth argument. See
+ * `AndroidBridge.onPositionsResolved`, surfaced via [FeatureBridgeState.positionsResolved]. See
  * docs/features/simulated-position.md.
  *
  * `loadCustomData` (`custom-data`'s refresh-then-read round trip) reports its result back via
- * `AndroidBridge.onCustomDataLoaded`, surfaced to [sheetContent] as its sixth argument. See
+ * `AndroidBridge.onCustomDataLoaded`, surfaced via [FeatureBridgeState.customDataLoaded]. See
  * docs/features/custom-data.md.
  *
  * `getCategories` (`category-highlight`'s venue-categories lookup) reports its result back via
- * `AndroidBridge.onCategoriesLoaded`, surfaced to [sheetContent] as its seventh argument. See
+ * `AndroidBridge.onCategoriesLoaded`, surfaced via [FeatureBridgeState.categoriesLoaded]. See
  * docs/features/category-highlight.md.
  *
  * `createDynamicPoi` (`dynamic-poi-crud`'s create-then-attach-a-label round trip) reports its
- * result back via `AndroidBridge.onDynamicPoiCreated`, surfaced to [sheetContent] as its eighth
- * argument. See docs/features/dynamic-poi-crud.md.
+ * result back via `AndroidBridge.onDynamicPoiCreated`, surfaced via
+ * [FeatureBridgeState.dynamicPoiCreated]. See docs/features/dynamic-poi-crud.md.
  *
  * `getCurrentLocale`/`setLocale` (`runtime-locale`'s current-locale lookup and locale switch)
- * both report back via the same `AndroidBridge.onLocaleResolved`, surfaced to [sheetContent] as
- * its ninth argument. See docs/features/runtime-locale.md.
+ * both report back via the same `AndroidBridge.onLocaleResolved`, surfaced via
+ * [FeatureBridgeState.localeResolved]. See docs/features/runtime-locale.md.
+ *
+ * `setExploreMode` (`explore-mode`'s building-exploration mode switch) has no direct response —
+ * the resulting mode is reported back, like any other explore-mode change (including ones
+ * triggered by map interaction, not this call), via `AndroidBridge.onExploreModeChanged`, also
+ * pushed once unprompted right after the map loads so the control has a correct initial highlight.
+ * Surfaced via [FeatureBridgeState.currentExploreMode]. See docs/features/explore-mode.md.
  *
  * [onMapReady] fires once, right after [MapLoadState.Ready] is reached, with the live [WebView] —
  * for a screen that needs to drive the bridge before the visitor ever opens the FAB's bottom
@@ -107,17 +136,7 @@ fun FeatureMapScreen(
     reactsToPoiClicks: Boolean = false,
     onMapReady: (WebView) -> Unit = {},
     onBack: () -> Unit,
-    sheetContent: @Composable (
-        webView: WebView?,
-        lastPoiClick: List<PoiClickInfo>,
-        floorSelector: FloorSelectorState,
-        navigationError: String?,
-        positionsResolved: ResolvedPositionsPair?,
-        customDataLoaded: CustomDataResult?,
-        categoriesLoaded: CategoriesResult?,
-        dynamicPoiCreated: DynamicPoiCreationResult?,
-        localeResolved: LocaleResult?,
-    ) -> Unit,
+    sheetContent: @Composable (webView: WebView?, bridgeState: FeatureBridgeState) -> Unit,
 ) {
     var loadState by remember { mutableStateOf<MapLoadState>(MapLoadState.Loading) }
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
@@ -131,6 +150,7 @@ fun FeatureMapScreen(
     var categoriesLoaded by remember { mutableStateOf<CategoriesResult?>(null) }
     var dynamicPoiCreated by remember { mutableStateOf<DynamicPoiCreationResult?>(null) }
     var localeResolved by remember { mutableStateOf<LocaleResult?>(null) }
+    var currentExploreMode by remember { mutableStateOf<String?>(null) }
     val sheetState = rememberModalBottomSheetState()
 
     Scaffold(
@@ -246,6 +266,9 @@ fun FeatureMapScreen(
                                         localeResolved = parseLocaleResultPayload(requestId, resultJson)
                                     }
                                 },
+                                notifyExploreModeChanged = { mode ->
+                                    mainHandler.post { currentExploreMode = mode }
+                                },
                             ),
                             "AndroidBridge",
                         )
@@ -287,14 +310,17 @@ fun FeatureMapScreen(
         ) {
             sheetContent(
                 webView,
-                lastPoiClick,
-                floorSelector,
-                navigationError,
-                positionsResolved,
-                customDataLoaded,
-                categoriesLoaded,
-                dynamicPoiCreated,
-                localeResolved,
+                FeatureBridgeState(
+                    lastPoiClick = lastPoiClick,
+                    floorSelector = floorSelector,
+                    navigationError = navigationError,
+                    positionsResolved = positionsResolved,
+                    customDataLoaded = customDataLoaded,
+                    categoriesLoaded = categoriesLoaded,
+                    dynamicPoiCreated = dynamicPoiCreated,
+                    localeResolved = localeResolved,
+                    currentExploreMode = currentExploreMode,
+                ),
             )
         }
     }
@@ -313,6 +339,7 @@ private class MapBridge(
     private val notifyCategoriesLoaded: (Int, String) -> Unit,
     private val notifyDynamicPoiCreated: (Int, String) -> Unit,
     private val notifyLocaleResolved: (Int, String) -> Unit,
+    private val notifyExploreModeChanged: (String) -> Unit,
 ) {
     @JavascriptInterface
     fun onMapReady() = onReady()
@@ -354,4 +381,7 @@ private class MapBridge(
     @JavascriptInterface
     fun onLocaleResolved(requestId: Int, resultJson: String) =
         notifyLocaleResolved(requestId, resultJson)
+
+    @JavascriptInterface
+    fun onExploreModeChanged(mode: String) = notifyExploreModeChanged(mode)
 }

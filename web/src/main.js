@@ -153,6 +153,20 @@ window.MapBridge = {
     if (!view) return;
     view.setUIPartVisible(uiPart, isVisible);
   },
+  // Switches the SDK's building-exploration mode by assigning
+  // view.currentExploreMode. mode is one of exactly 3 case-sensitive values
+  // ('global', 'building', 'floor' — see the SDK's ExploreMode type); an
+  // unrecognized value is rejected by the SDK itself, this bridge does no
+  // validation of its own, same convention as setUIPartVisible above. The
+  // resulting change (including any change triggered another way, e.g. a
+  // click while in "building" mode) is reported back via
+  // onExploreModeChanged below, so this call itself does not report
+  // anything — same "fire the command, listen for the echo" split as
+  // goToFloor/onFloorChanged. See docs/features/explore-mode.md.
+  setExploreMode(mode) {
+    if (!view) return;
+    view.currentExploreMode = mode;
+  },
   // Resolves the WGS84 position of two POIs by id in one round trip, and
   // reports both back to native via AndroidBridge.onPositionsResolved.
   // POIs carry no direct lat/lng field — it's read from the first
@@ -436,6 +450,18 @@ function onCurrentFloorChanged(event) {
   bridge?.onFloorChanged(event.newFloor?.id ?? null);
 }
 
+// Forwards the SDK's 'exploremodechanged' event to native as a bare mode
+// string, so the explore-mode control can keep its highlighted option in
+// sync even when the mode changes another way than its own buttons — most
+// notably a click while in "building" mode, which the SDK auto-switches to
+// "floor" (see the SDK's ExploreMode.ts). Also used to seed the control's
+// initial highlight once, right after the view is created (see main()
+// below) — currentExploreMode always starts at "global". See
+// docs/features/explore-mode.md.
+function onExploreModeChanged(event) {
+  bridge?.onExploreModeChanged(event.currentExploreMode);
+}
+
 // Web -> Native bridge: forwards the SDK's 'poiclick' event to the native side,
 // so a screen can react to the user tapping a POI on the map (see
 // docs/features/poi-click.md). The payload is a JSON-encoded array (usually a
@@ -459,6 +485,7 @@ async function main() {
     view = await visioOne.createView(container, venue);
     view.addEventListener('poiclick', onPoiClick);
     view.addEventListener('currentfloorchanged', onCurrentFloorChanged);
+    view.addEventListener('exploremodechanged', onExploreModeChanged);
     // Only the first building's floors are exposed today — see
     // docs/features/floor-selector.md, "Points d'attention" for why a
     // building switcher is out of scope for this demo.
@@ -466,6 +493,11 @@ async function main() {
     if (building) {
       bridge?.onFloorsReady(JSON.stringify(buildingFloorsPayload(building)));
     }
+    // Seeds the explore-mode control's initial highlight — there is no
+    // "onReady" data push for it like onFloorsReady above, since
+    // currentExploreMode always starts at "global" and needs no venue data
+    // to report. See docs/features/explore-mode.md.
+    bridge?.onExploreModeChanged(view.currentExploreMode);
     bridge?.onMapReady();
   } catch (error) {
     bridge?.onMapError(String(error?.message ?? error));

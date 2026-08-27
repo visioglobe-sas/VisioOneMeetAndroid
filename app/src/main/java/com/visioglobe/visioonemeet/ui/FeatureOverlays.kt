@@ -149,6 +149,28 @@ private val UI_PART_TOGGLES = listOf(
 )
 
 /**
+ * Switches the SDK's building-exploration mode by calling `window.MapBridge.setExploreMode` in the
+ * WebView (`view.currentExploreMode = mode` under the hood). [mode] must be one of the SDK's exact,
+ * case-sensitive `ExploreMode` values (`global`, `building`, `floor`) — see [EXPLORE_MODE_OPTIONS]
+ * below. See docs/features/explore-mode.md.
+ */
+private fun WebView.setExploreMode(mode: String) {
+    val script = "window.MapBridge.setExploreMode(${JSONObject.quote(mode)})"
+    evaluateJavascript(script, null)
+}
+
+/**
+ * The 3 explore modes the SDK's `View.currentExploreMode` accepts, paired with a human-readable
+ * label. These string values are exact and case-sensitive — they are not free-form, the SDK
+ * defines no others. See docs/features/explore-mode.md.
+ */
+private val EXPLORE_MODE_OPTIONS = listOf(
+    "global" to R.string.explore_mode_option_global,
+    "building" to R.string.explore_mode_option_building,
+    "floor" to R.string.explore_mode_option_floor,
+)
+
+/**
  * Resolves the WGS84 position of [originId]/[destinationId] in one round trip by calling
  * `window.MapBridge.resolvePositions` in the WebView. The result arrives asynchronously via
  * `AndroidBridge.onPositionsResolved`, echoing [requestId] back so the caller can match the
@@ -1427,6 +1449,50 @@ fun RuntimeLocaleOverlay(webView: WebView?, localeResolved: LocaleResult?) {
         if (errorMessage != null) {
             Spacer(modifier = Modifier.height(8.dp))
             Text(text = errorMessage.orEmpty(), color = MaterialTheme.colorScheme.error)
+        }
+    }
+}
+
+/**
+ * FAB-triggered control for `explore-mode`: one button per [EXPLORE_MODE_OPTIONS] entry, the
+ * active one (per [currentExploreMode]) rendered as a filled, disabled [Button] — same
+ * "current state" styling as [FloorSelectorOverlay]/[RuntimeLocaleOverlay] — every other option as
+ * an [OutlinedButton]. Tapping a non-active option calls [WebView.setExploreMode]; the highlight
+ * itself is never set optimistically from the tap — it only ever moves in response to
+ * `AndroidBridge.onExploreModeChanged` (surfaced here as [currentExploreMode]), so it stays correct
+ * even when the mode changes from map interaction rather than this overlay's own buttons — most
+ * notably a click while in "building" mode, which the SDK auto-switches to "floor" on its own. See
+ * docs/features/explore-mode.md.
+ *
+ * "Building" mode is this feature's flagship visual: the exploded "carousel" view of every opened
+ * building's floors. It needs no building to already be open — the SDK falls back to the venue's
+ * first building when none is — so tapping it is always enough to trigger the effect, no setup
+ * required, which is the point for a sales-demo "wahou" moment.
+ */
+@Composable
+fun ExploreModeOverlay(webView: WebView?, currentExploreMode: String?) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp),
+    ) {
+        EXPLORE_MODE_OPTIONS.forEach { (mode, labelRes) ->
+            val isCurrent = mode == currentExploreMode
+            val buttonModifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 4.dp)
+            if (isCurrent) {
+                Button(onClick = {}, enabled = false, modifier = buttonModifier) {
+                    Text(stringResource(labelRes))
+                }
+            } else {
+                OutlinedButton(
+                    onClick = { webView?.setExploreMode(mode) },
+                    modifier = buttonModifier,
+                ) {
+                    Text(stringResource(labelRes))
+                }
+            }
         }
     }
 }

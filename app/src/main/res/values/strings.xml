@@ -41,4 +41,9 @@
     <string name="feature_runtime_locale_description">Switch the map\'s displayed language live, without reloading or republishing.</string>
     <string name="runtime_locale_option_english">English</string>
     <string name="runtime_locale_option_french">Français</string>
+    <string name="feature_explore_mode_title">Explore mode</string>
+    <string name="feature_explore_mode_description">Switch between global, exploded building carousel and single-floor views.</string>
+    <string name="explore_mode_option_global">Global</string>
+    <string name="explore_mode_option_building">Building</string>
+    <string name="explore_mode_option_floor">Floor</string>
 </resources>

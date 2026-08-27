@@ -84,6 +84,11 @@ enum class Feature(
         titleRes = R.string.feature_runtime_locale_title,
         descriptionRes = R.string.feature_runtime_locale_description,
     ),
+    ExploreMode(
+        slug = "explore-mode",
+        titleRes = R.string.feature_explore_mode_title,
+        descriptionRes = R.string.feature_explore_mode_description,
+    ),
     ;
 
     companion object {
