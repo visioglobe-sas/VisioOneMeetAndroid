@@ -19,12 +19,14 @@ import com.visioglobe.visioonemeet.ui.FeatureMapScreen
 import com.visioglobe.visioonemeet.ui.FeatureMenuScreen
 import com.visioglobe.visioonemeet.ui.FloorSelectorOverlay
 import com.visioglobe.visioonemeet.ui.GoToPoiOverlay
+import com.visioglobe.visioonemeet.ui.NativeUiReplacementOverlay
 import com.visioglobe.visioonemeet.ui.OccupancySimulationOverlay
 import com.visioglobe.visioonemeet.ui.PoiClickOverlay
 import com.visioglobe.visioonemeet.ui.ResetViewOverlay
 import com.visioglobe.visioonemeet.ui.RuntimeLocaleOverlay
 import com.visioglobe.visioonemeet.ui.SimulatedPositionOverlay
 import com.visioglobe.visioonemeet.ui.UiPartVisibilityOverlay
+import com.visioglobe.visioonemeet.ui.setUiPartVisible
 import com.visioglobe.visioonemeet.ui.theme.VisioOneMeetTheme
 
 /** Hash of the VisioOne map to display, as found on the my.visioglobe.com portal. */
@@ -57,6 +59,14 @@ class MainActivity : ComponentActivity() {
                             titleRes = feature?.titleRes,
                             modifier = Modifier.fillMaxSize(),
                             reactsToPoiClicks = feature == Feature.PoiClick,
+                            onMapReady = { webView ->
+                                // Hides the SDK's own default floor-selector widget as soon as the
+                                // map loads, matching NativeUiReplacementOverlay's switch, which
+                                // starts off — see docs/features/native-ui-replacement.md.
+                                if (feature == Feature.NativeUiReplacement) {
+                                    webView.setUiPartVisible("floorSelector", false)
+                                }
+                            },
                             onBack = { navController.popBackStack() },
                             sheetContent = { webView, lastPoiClick, floorSelector, navigationError, positionsResolved, customDataLoaded, categoriesLoaded, dynamicPoiCreated, localeResolved ->
                                 when (feature) {
@@ -67,6 +77,8 @@ class MainActivity : ComponentActivity() {
                                     Feature.FloorSelector -> FloorSelectorOverlay(webView, floorSelector)
                                     Feature.ComputeNavigation -> ComputeNavigationOverlay(webView, navigationError)
                                     Feature.UiPartVisibility -> UiPartVisibilityOverlay(webView)
+                                    Feature.NativeUiReplacement ->
+                                        NativeUiReplacementOverlay(webView, floorSelector)
                                     Feature.SimulatedPosition -> SimulatedPositionOverlay(webView, positionsResolved)
                                     Feature.CameraLockOnPosition ->
                                         CameraLockOnPositionOverlay(webView, positionsResolved)

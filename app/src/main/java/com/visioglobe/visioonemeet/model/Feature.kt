@@ -44,6 +44,11 @@ enum class Feature(
         titleRes = R.string.feature_ui_part_visibility_title,
         descriptionRes = R.string.feature_ui_part_visibility_description,
     ),
+    NativeUiReplacement(
+        slug = "native-ui-replacement",
+        titleRes = R.string.feature_native_ui_replacement_title,
+        descriptionRes = R.string.feature_native_ui_replacement_description,
+    ),
     SimulatedPosition(
         slug = "simulated-position",
         titleRes = R.string.feature_simulated_position_title,

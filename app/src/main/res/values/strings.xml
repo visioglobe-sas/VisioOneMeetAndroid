@@ -22,6 +22,9 @@
     <string name="ui_part_poi_details_label">POI details</string>
     <string name="ui_part_search_label">Search</string>
     <string name="ui_part_user_tracking_label">User tracking</string>
+    <string name="feature_native_ui_replacement_title">Native UI replacement</string>
+    <string name="feature_native_ui_replacement_description">Replace the SDK\'s own floor selector with a fully native one.</string>
+    <string name="native_ui_replacement_show_sdk_selector_label">Show SDK\'s own floor selector</string>
     <string name="feature_simulated_position_title">Simulated position</string>
     <string name="feature_simulated_position_description">Animate a simulated position with an accuracy circle between two POIs.</string>
     <string name="feature_camera_lock_on_position_title">Camera lock</string>
