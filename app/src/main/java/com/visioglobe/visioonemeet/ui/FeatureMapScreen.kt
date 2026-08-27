@@ -91,6 +91,12 @@ private sealed interface MapLoadState {
  * `getCurrentLocale`/`setLocale` (`runtime-locale`'s current-locale lookup and locale switch)
  * both report back via the same `AndroidBridge.onLocaleResolved`, surfaced to [sheetContent] as
  * its ninth argument. See docs/features/runtime-locale.md.
+ *
+ * [onMapReady] fires once, right after [MapLoadState.Ready] is reached, with the live [WebView] —
+ * for a screen that needs to drive the bridge before the visitor ever opens the FAB's bottom
+ * sheet. `native-ui-replacement` is the only user of it today: it hides the SDK's own default
+ * floor-selector widget as soon as the map loads, rather than only once the sheet's toggle is
+ * touched, see docs/features/native-ui-replacement.md.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -99,6 +105,7 @@ fun FeatureMapScreen(
     titleRes: Int?,
     modifier: Modifier = Modifier,
     reactsToPoiClicks: Boolean = false,
+    onMapReady: (WebView) -> Unit = {},
     onBack: () -> Unit,
     sheetContent: @Composable (
         webView: WebView?,
@@ -177,7 +184,12 @@ fun FeatureMapScreen(
 
                         addJavascriptInterface(
                             MapBridge(
-                                onReady = { mainHandler.post { loadState = MapLoadState.Ready } },
+                                onReady = {
+                                    mainHandler.post {
+                                        loadState = MapLoadState.Ready
+                                        webView?.let(onMapReady)
+                                    }
+                                },
                                 onError = { message -> mainHandler.post { loadState = MapLoadState.Error(message) } },
                                 notifyPoiClick = { payload ->
                                     if (reactsToPoiClicks) {

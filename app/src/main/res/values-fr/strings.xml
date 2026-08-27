@@ -21,6 +21,9 @@
     <string name="ui_part_poi_details_label">Détails du POI</string>
     <string name="ui_part_search_label">Recherche</string>
     <string name="ui_part_user_tracking_label">Suivi de position</string>
+    <string name="feature_native_ui_replacement_title">Remplacement d\'UI native</string>
+    <string name="feature_native_ui_replacement_description">Remplace le sélecteur d\'étage du SDK par un équivalent entièrement natif.</string>
+    <string name="native_ui_replacement_show_sdk_selector_label">Afficher le sélecteur d\'étage du SDK</string>
     <string name="feature_simulated_position_title">Position simulée</string>
     <string name="feature_simulated_position_description">Anime une position simulée avec un cercle de précision entre deux POI.</string>
     <string name="feature_camera_lock_on_position_title">Verrouillage caméra</string>

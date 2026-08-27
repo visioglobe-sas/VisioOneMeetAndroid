@@ -130,7 +130,7 @@ private fun WebView.clearNavigation() {
  * `poiDetails`, `search`, `userTracking`) — see [UI_PART_TOGGLES] below. See
  * docs/features/ui-part-visibility.md.
  */
-private fun WebView.setUiPartVisible(uiPart: String, isVisible: Boolean) {
+internal fun WebView.setUiPartVisible(uiPart: String, isVisible: Boolean) {
     val script = "window.MapBridge.setUIPartVisible(${JSONObject.quote(uiPart)}, $isVisible)"
     evaluateJavascript(script, null)
 }
@@ -752,6 +752,49 @@ fun UiPartVisibilityOverlay(webView: WebView?) {
             }
         }
     }
+}
+
+/**
+ * FAB-triggered control for `native-ui-replacement`: a single switch, "Show SDK's own floor
+ * selector" — defaults to off, matching the hide-on-load call [FeatureMapScreen]'s `onMapReady`
+ * hook makes for this screen (see `MainActivity.kt`), via the same [WebView.setUiPartVisible]
+ * used by [UiPartVisibilityOverlay] — so the SDK's own widget stays hidden unless the visitor
+ * flips this switch on, letting them compare both driving the same floor live.
+ *
+ * Below the switch, [FloorSelectorOverlay] is reused verbatim, unaware of this switch's state:
+ * the app's own native floor list stays fully functional regardless of it, demonstrating that
+ * it's already a complete replacement for the SDK's widget, not merely a duplicate shown next to
+ * it. See docs/features/native-ui-replacement.md.
+ */
+@Composable
+fun NativeUiReplacementOverlay(webView: WebView?, floorSelector: FloorSelectorState) {
+    var showSdkFloorSelector by remember { mutableStateOf(false) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = stringResource(R.string.native_ui_replacement_show_sdk_selector_label),
+                modifier = Modifier.weight(1f),
+            )
+            Switch(
+                checked = showSdkFloorSelector,
+                onCheckedChange = { isVisible ->
+                    showSdkFloorSelector = isVisible
+                    webView?.setUiPartVisible("floorSelector", isVisible)
+                },
+            )
+        }
+    }
+    FloorSelectorOverlay(webView, floorSelector)
 }
 
 /**

@@ -51,6 +51,7 @@ Each feature below is a self-contained screen in the app demonstrating one Visio
 - [Floor Selector](docs/features/floor-selector.md) — drive floor changes from a native UI via `view.goToFloor()`, in sync with the `currentfloorchanged` event.
 - [Compute Navigation](docs/features/compute-navigation.md) — compute and draw a route between two POIs via `venue.computeNavigation()`.
 - [UI Part Visibility](docs/features/ui-part-visibility.md) — toggle individual pieces of the SDK's default on-map UI via `view.setUIPartVisible()`.
+- [Native UI Replacement](docs/features/native-ui-replacement.md) — hide the SDK's default floor selector via `view.setUIPartVisible('floorSelector', false)` and drive floors entirely from the app's own native picker.
 - [Simulated Position](docs/features/simulated-position.md) — animate a simulated tracked position via `view.injectTrackedPosition()`, the same API a real indoor-positioning integration would use.
 - [Camera Lock on Position](docs/features/camera-lock-on-position.md) — lock the camera onto a tracked position via `view.lockCameraPositionOnTracking`.
 - [Clickable Surface](docs/features/clickable-surface.md) — make a POI's surface interactive, with the SDK managing hover/selection colors via `venue.updateSurface()`.
