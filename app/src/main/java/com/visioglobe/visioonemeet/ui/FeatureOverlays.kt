@@ -338,6 +338,40 @@ private fun WebView.addSpanishLocale(requestId: Int) {
 }
 
 /**
+ * Resolves [placeId] to a POI and caches its surfaces as the zone geofencing checks against by
+ * calling `window.MapBridge.resolveZone` in the WebView (`venue.pois.find` + `poi.surfaces` under
+ * the hood — no dedicated SDK geofence concept). The result — 'found', 'not-found', or
+ * 'no-surface' — arrives asynchronously via `AndroidBridge.onZoneResolved`, echoing [requestId]
+ * back, same convention as [WebView.resolvePositions]. See docs/features/geofencing.md.
+ */
+private fun WebView.resolveZone(requestId: Int, placeId: String) {
+    val script = "window.MapBridge.resolveZone($requestId, ${JSONObject.quote(placeId)})"
+    evaluateJavascript(script, null)
+}
+
+/**
+ * Reverts the alert color applied while the tracked position was inside the zone, if any, and
+ * forgets it, by calling `window.MapBridge.clearZone` in the WebView. See
+ * docs/features/geofencing.md.
+ */
+private fun WebView.clearZone() {
+    evaluateJavascript("window.MapBridge.clearZone()", null)
+}
+
+/**
+ * Tests the given position against the zone resolved by [resolveZone] by calling
+ * `window.MapBridge.checkGeofence` in the WebView (a hand-rolled point-in-polygon check against
+ * `Surface.positions` — there is no SDK method for this). Meant to be called on every tick of the
+ * tracked-position simulation loop, alongside [injectTrackedPosition]. The current inside/outside
+ * state is reported back via `AndroidBridge.onGeofenceStateChanged`. See
+ * docs/features/geofencing.md.
+ */
+private fun WebView.checkGeofence(latitude: Double, longitude: Double) {
+    val script = "window.MapBridge.checkGeofence($latitude, $longitude)"
+    evaluateJavascript(script, null)
+}
+
+/**
  * Result of a [WebView.loadCustomData] call: [requestId] echoes the value passed to that call, so
  * a stale response can be told apart from the current one, same convention as
  * [ResolvedPositionsPair]. [customData] is `null` when `placeId` didn't resolve to a POI at all
@@ -384,6 +418,14 @@ internal fun parseResolvedPosition(json: String): ResolvedPosition? {
     val root = JSONObject(json)
     return ResolvedPosition(latitude = root.getDouble("latitude"), longitude = root.getDouble("longitude"))
 }
+
+/**
+ * Result of a [WebView.resolveZone] call: [requestId] echoes the value passed to that call, so a
+ * stale response can be told apart from the current one, same convention as [ResolvedPositionsPair].
+ * [status] is one of `"found"`, `"not-found"` (no POI matches the given id), or `"no-surface"` (the
+ * POI has no `surfaces` to test a position against). See docs/features/geofencing.md.
+ */
+data class ZoneResolution(val requestId: Int, val status: String)
 
 /** A single venue category, carried by the `AndroidBridge.onCategoriesLoaded` payload. [id] is the
  * SDK's raw `Category.id` (a numeric string on the shared demo map, e.g. "1".."11") — used for
@@ -885,6 +927,8 @@ private fun TrackedPositionSimulationControls(
     webView: WebView?,
     positionsResolved: ResolvedPositionsPair?,
     onRunningChanged: (Boolean) -> Unit = {},
+    startEnabled: Boolean = true,
+    onTick: (latitude: Double, longitude: Double) -> Unit = { _, _ -> },
     extraContent: @Composable () -> Unit = {},
 ) {
     var originId by remember { mutableStateOf("") }
@@ -962,7 +1006,7 @@ private fun TrackedPositionSimulationControls(
                     webView?.resolvePositions(requestId, originId.trim(), destinationId.trim())
                 }
             },
-            enabled = isRunning || (originId.isNotBlank() && destinationId.isNotBlank()),
+            enabled = isRunning || (originId.isNotBlank() && destinationId.isNotBlank() && startEnabled),
         ) {
             Text(if (isRunning) "Stop simulated position" else "Start simulated position")
         }
@@ -985,6 +1029,7 @@ private fun TrackedPositionSimulationControls(
                 val latitude = origin.latitude + (destination.latitude - origin.latitude) * fraction
                 val longitude = origin.longitude + (destination.longitude - origin.longitude) * fraction
                 view.injectTrackedPosition(latitude, longitude, radiusMeters.toDouble())
+                onTick(latitude, longitude)
                 delay(SIMULATED_POSITION_INTERVAL_MS)
                 fraction += direction * SIMULATED_POSITION_STEP
                 when {
@@ -1628,4 +1673,85 @@ fun AddLocaleOverlay(webView: WebView?, addLocaleResolved: AddLocaleResult?) {
             Text(if (switchedToSpanish) "Switched to Spanish" else "Switch to Spanish")
         }
     }
+}
+
+/**
+ * FAB-triggered control for `geofencing`: [TrackedPositionSimulationControls] (a moving simulated
+ * position is needed to demonstrate entering/leaving a zone) plus a "Zone POI ID" field resolved
+ * once at Start via [WebView.resolveZone] — Start is disabled until the field is non-blank, same
+ * `startEnabled` gate CameraLockOnPositionOverlay leaves at its default. Every tick of the
+ * simulation loop also calls [WebView.checkGeofence] with the freshly interpolated position (piggy-
+ * backed via [TrackedPositionSimulationControls]'s `onTick`, no separate polling), whose result is
+ * reported back live via `AndroidBridge.onGeofenceStateChanged` and shown as "Inside zone"/"Outside
+ * zone" text — the JS side itself also recolors the zone's surface(s) as a visual alert on a state
+ * transition, this overlay never touches `venue.updateSurface` directly. Stopping the simulation
+ * calls [WebView.clearZone] to revert that color and forget the zone, so restarting always begins
+ * from a clean, unresolved zone — same "fresh opt-in each time" idiom as
+ * CameraLockOnPositionOverlay's lock switch. See docs/features/geofencing.md.
+ */
+@Composable
+fun GeofencingOverlay(
+    webView: WebView?,
+    positionsResolved: ResolvedPositionsPair?,
+    zoneResolved: ZoneResolution?,
+    isInsideZone: Boolean,
+) {
+    var zoneId by remember { mutableStateOf("") }
+    var isRunning by remember { mutableStateOf(false) }
+    var zoneErrorMessage by remember { mutableStateOf<String?>(null) }
+    var pendingZoneRequestId by remember { mutableStateOf<Int?>(null) }
+    var nextZoneRequestId by remember { mutableStateOf(0) }
+
+    // Reacts to the response of the resolveZone() call fired when the simulation starts. `requestId`
+    // guards against a stale response the same way positionsResolved does above.
+    LaunchedEffect(zoneResolved) {
+        val result = zoneResolved ?: return@LaunchedEffect
+        if (result.requestId != pendingZoneRequestId) return@LaunchedEffect
+        pendingZoneRequestId = null
+        zoneErrorMessage = when (result.status) {
+            "not-found" -> "Zone POI not found"
+            "no-surface" -> "Zone POI has no surface geometry"
+            else -> null
+        }
+    }
+
+    TrackedPositionSimulationControls(
+        webView = webView,
+        positionsResolved = positionsResolved,
+        startEnabled = zoneId.isNotBlank(),
+        onRunningChanged = { running ->
+            isRunning = running
+            if (running) {
+                zoneErrorMessage = null
+                val requestId = nextZoneRequestId++
+                pendingZoneRequestId = requestId
+                webView?.resolveZone(requestId, zoneId.trim())
+            } else {
+                pendingZoneRequestId = null
+                webView?.clearZone()
+            }
+        },
+        onTick = { latitude, longitude -> webView?.checkGeofence(latitude, longitude) },
+        extraContent = {
+            Spacer(modifier = Modifier.height(8.dp))
+            OutlinedTextField(
+                value = zoneId,
+                onValueChange = { zoneId = it },
+                label = { Text("Zone POI ID") },
+                singleLine = true,
+                enabled = !isRunning,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            when {
+                zoneErrorMessage != null -> {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(text = zoneErrorMessage.orEmpty(), color = MaterialTheme.colorScheme.error)
+                }
+                isRunning -> {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(text = if (isInsideZone) "Inside zone" else "Outside zone")
+                }
+            }
+        },
+    )
 }

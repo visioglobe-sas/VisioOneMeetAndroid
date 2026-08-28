@@ -20,6 +20,7 @@ import com.visioglobe.visioonemeet.ui.ExploreModeOverlay
 import com.visioglobe.visioonemeet.ui.FeatureMapScreen
 import com.visioglobe.visioonemeet.ui.FeatureMenuScreen
 import com.visioglobe.visioonemeet.ui.FloorSelectorOverlay
+import com.visioglobe.visioonemeet.ui.GeofencingOverlay
 import com.visioglobe.visioonemeet.ui.GoToPoiOverlay
 import com.visioglobe.visioonemeet.ui.NativeUiReplacementOverlay
 import com.visioglobe.visioonemeet.ui.OccupancySimulationOverlay
@@ -97,6 +98,12 @@ class MainActivity : ComponentActivity() {
                                         ExploreModeOverlay(webView, bridgeState.currentExploreMode)
                                     Feature.AddLocale ->
                                         AddLocaleOverlay(webView, bridgeState.addLocaleResolved)
+                                    Feature.Geofencing -> GeofencingOverlay(
+                                        webView,
+                                        bridgeState.positionsResolved,
+                                        bridgeState.zoneResolved,
+                                        bridgeState.isInsideGeofenceZone,
+                                    )
                                     null -> Unit
                                 }
                             },

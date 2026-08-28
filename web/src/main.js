@@ -33,6 +33,24 @@ let highlightedCategoryId = null;
 // just a demo choice. See docs/features/category-highlight.md.
 const CATEGORY_HIGHLIGHT_COLOR = '#FF6B00';
 
+// The zone POI last resolved by `resolveZone`, cached so `checkGeofence` has
+// something to test the tracked position against without re-resolving the
+// POI on every tick, and so `clearZone` knows which surfaces to revert. Only
+// one zone is tracked at a time — a demo-side simplification, not an SDK
+// limitation, same convention as `dynamicPoi`/`highlightedCategoryId`. See
+// docs/features/geofencing.md.
+let geofenceZone = null;
+
+// Whether the last position checked by `checkGeofence` was inside
+// `geofenceZone`, so a repeated tick at the same state doesn't re-issue the
+// same `venue.updateSurface` call. See docs/features/geofencing.md.
+let isInsideGeofenceZone = false;
+
+// Any clearly visible "alert" color works here — this isn't an SDK-mandated
+// value, just a demo choice, same convention as CATEGORY_HIGHLIGHT_COLOR.
+// See docs/features/geofencing.md.
+const GEOFENCE_ALERT_COLOR = '#E74C3C';
+
 // The POI/Label pair created at runtime by createDynamicPoi, tracked so
 // updateDynamicPoiLabel/removeDynamicPoi know what to act on. Only one
 // dynamic POI is tracked at a time — a demo-side simplification, not an SDK
@@ -50,6 +68,26 @@ const ADD_LOCALE_RESOURCES = {
   'search-for-anything': 'Busca lo que quieras',
   'welcome-message': '¡Bienvenido al mapa!',
 };
+
+// The SDK has no built-in geofencing/point-in-polygon primitive — this demo
+// implements containment itself against `Surface.positions` (the public,
+// WGS84 vertex list of a zone POI's surface, same coordinate space as
+// `injectTrackedPosition`, so no conversion is needed). Standard ray-casting,
+// treating latitude/longitude as planar y/x, which is accurate enough at
+// building scale. See docs/features/geofencing.md.
+function isPositionInsidePolygon(position, polygonPositions) {
+  const { latitude: y, longitude: x } = position;
+  let inside = false;
+  for (let i = 0, j = polygonPositions.length - 1; i < polygonPositions.length; j = i++) {
+    const xi = polygonPositions[i].longitude;
+    const yi = polygonPositions[i].latitude;
+    const xj = polygonPositions[j].longitude;
+    const yj = polygonPositions[j].latitude;
+    const intersects = yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi;
+    if (intersects) inside = !inside;
+  }
+  return inside;
+}
 
 // Native -> JS bridge: one method per command, called from Kotlin via
 // WebView.evaluateJavascript(). Kotlin JSON-encodes arguments before
@@ -453,6 +491,65 @@ window.MapBridge = {
         JSON.stringify({ status: 'error', message: String(error?.message ?? error) }),
       );
     }
+  },
+  // Resolves placeId to a POI and caches its surfaces as the zone geofencing
+  // checks against, reporting one of 'found'/'not-found'/'no-surface' back to
+  // native via AndroidBridge.onZoneResolved, requestId echoed back, same
+  // convention as resolvePositions/getCurrentLocale. A POI with no surfaces
+  // (e.g. a point/marker-only outdoor POI) has no polygon to test a position
+  // against, so it's reported as its own distinct outcome rather than
+  // silently behaving like "always outside". See docs/features/geofencing.md.
+  resolveZone(requestId, placeId) {
+    if (!venue) return;
+    const poi = venue.pois.find((p) => p.id === placeId);
+    if (!poi) {
+      geofenceZone = null;
+      bridge?.onZoneResolved(requestId, 'not-found');
+      return;
+    }
+    if (!poi.surfaces.length) {
+      geofenceZone = null;
+      bridge?.onZoneResolved(requestId, 'no-surface');
+      return;
+    }
+    geofenceZone = { surfaces: poi.surfaces };
+    isInsideGeofenceZone = false;
+    bridge?.onZoneResolved(requestId, 'found');
+  },
+  // Reverts the alert color applied by checkGeofence below (if the tracked
+  // position was ever inside the zone) and forgets the resolved zone. Called
+  // when the simulation is stopped. See docs/features/geofencing.md.
+  clearZone() {
+    if (!venue || !geofenceZone) return;
+    geofenceZone.surfaces.forEach((surface) => {
+      venue.updateSurface(surface, { color: 'initial' });
+    });
+    geofenceZone = null;
+    isInsideGeofenceZone = false;
+  },
+  // Tests the tracked position injected by injectTrackedPosition against the
+  // zone resolved by resolveZone above (isPositionInsidePolygon — there is no
+  // SDK method for this) and, on a state transition, recolors the zone's
+  // surface(s) as a visual alert via venue.updateSurface — the same
+  // "recolor a surface" primitive already used by
+  // clickable-surface/category-highlight, not a dedicated alert/marker SDK
+  // concept. Reports the current state back to native on every call via
+  // AndroidBridge.onGeofenceStateChanged, not just on a transition, so a late
+  // subscriber (e.g. the sheet reopening) still gets a correct value. A no-op
+  // if no zone is resolved (e.g. Start pressed with an unresolved/invalid
+  // Zone POI ID). See docs/features/geofencing.md.
+  checkGeofence(latitude, longitude) {
+    if (!venue || !geofenceZone) return;
+    const isInside = geofenceZone.surfaces.some((surface) =>
+      isPositionInsidePolygon({ latitude, longitude }, surface.positions),
+    );
+    if (isInside !== isInsideGeofenceZone) {
+      isInsideGeofenceZone = isInside;
+      geofenceZone.surfaces.forEach((surface) => {
+        venue.updateSurface(surface, { color: isInside ? GEOFENCE_ALERT_COLOR : 'initial' });
+      });
+    }
+    bridge?.onGeofenceStateChanged(isInside);
   },
 };
 

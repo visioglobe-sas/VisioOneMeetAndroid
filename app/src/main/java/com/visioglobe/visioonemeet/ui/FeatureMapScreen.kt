@@ -67,6 +67,8 @@ data class FeatureBridgeState(
     val localeResolved: LocaleResult? = null,
     val currentExploreMode: String? = null,
     val addLocaleResolved: AddLocaleResult? = null,
+    val zoneResolved: ZoneResolution? = null,
+    val isInsideGeofenceZone: Boolean = false,
 )
 
 /**
@@ -120,6 +122,12 @@ data class FeatureBridgeState(
  * `AndroidBridge.onAddLocaleResolved`, surfaced via [FeatureBridgeState.addLocaleResolved]. See
  * docs/features/add-locale.md.
  *
+ * `resolveZone` (`geofencing`'s zone-POI-id-to-surfaces lookup) reports its result back via
+ * `AndroidBridge.onZoneResolved`, surfaced via [FeatureBridgeState.zoneResolved]. `checkGeofence`
+ * (the per-tick point-in-polygon test against that zone) reports the current inside/outside state,
+ * on every call rather than only on a transition, via `AndroidBridge.onGeofenceStateChanged`,
+ * surfaced via [FeatureBridgeState.isInsideGeofenceZone]. See docs/features/geofencing.md.
+ *
  * `setExploreMode` (`explore-mode`'s building-exploration mode switch) has no direct response —
  * the resulting mode is reported back, like any other explore-mode change (including ones
  * triggered by map interaction, not this call), via `AndroidBridge.onExploreModeChanged`, also
@@ -157,6 +165,8 @@ fun FeatureMapScreen(
     var localeResolved by remember { mutableStateOf<LocaleResult?>(null) }
     var currentExploreMode by remember { mutableStateOf<String?>(null) }
     var addLocaleResolved by remember { mutableStateOf<AddLocaleResult?>(null) }
+    var zoneResolved by remember { mutableStateOf<ZoneResolution?>(null) }
+    var isInsideGeofenceZone by remember { mutableStateOf(false) }
     val sheetState = rememberModalBottomSheetState()
 
     Scaffold(
@@ -280,6 +290,14 @@ fun FeatureMapScreen(
                                         addLocaleResolved = parseAddLocaleResultPayload(requestId, resultJson)
                                     }
                                 },
+                                notifyZoneResolved = { requestId, status ->
+                                    mainHandler.post {
+                                        zoneResolved = ZoneResolution(requestId = requestId, status = status)
+                                    }
+                                },
+                                notifyGeofenceStateChanged = { isInside ->
+                                    mainHandler.post { isInsideGeofenceZone = isInside }
+                                },
                             ),
                             "AndroidBridge",
                         )
@@ -332,6 +350,8 @@ fun FeatureMapScreen(
                     localeResolved = localeResolved,
                     currentExploreMode = currentExploreMode,
                     addLocaleResolved = addLocaleResolved,
+                    zoneResolved = zoneResolved,
+                    isInsideGeofenceZone = isInsideGeofenceZone,
                 ),
             )
         }
@@ -353,6 +373,8 @@ private class MapBridge(
     private val notifyLocaleResolved: (Int, String) -> Unit,
     private val notifyExploreModeChanged: (String) -> Unit,
     private val notifyAddLocaleResolved: (Int, String) -> Unit,
+    private val notifyZoneResolved: (Int, String) -> Unit,
+    private val notifyGeofenceStateChanged: (Boolean) -> Unit,
 ) {
     @JavascriptInterface
     fun onMapReady() = onReady()
@@ -400,4 +422,10 @@ private class MapBridge(
 
     @JavascriptInterface
     fun onAddLocaleResolved(requestId: Int, resultJson: String) = notifyAddLocaleResolved(requestId, resultJson)
+
+    @JavascriptInterface
+    fun onZoneResolved(requestId: Int, status: String) = notifyZoneResolved(requestId, status)
+
+    @JavascriptInterface
+    fun onGeofenceStateChanged(isInside: Boolean) = notifyGeofenceStateChanged(isInside)
 }
