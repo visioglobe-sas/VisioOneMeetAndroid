@@ -45,4 +45,6 @@
     <string name="explore_mode_option_global">Global</string>
     <string name="explore_mode_option_building">Bâtiment</string>
     <string name="explore_mode_option_floor">Étage</string>
+    <string name="feature_add_locale_title">Ajout de langue</string>
+    <string name="feature_add_locale_description">Ajouter à la volée une langue jamais paramétrée dans VisioMapEditor pour cette carte.</string>
 </resources>

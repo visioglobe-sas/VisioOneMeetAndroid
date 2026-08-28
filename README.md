@@ -60,6 +60,7 @@ Each feature below is a self-contained screen in the app demonstrating one Visio
 - [Dynamic POI CRUD](docs/features/dynamic-poi-crud.md) — create, update and remove a POI at runtime via `venue.createPOI()`/`venue.createLabel()`/`venue.updateLabel()`/`venue.removePOI()`, without republishing the map.
 - [Runtime Locale](docs/features/runtime-locale.md) — switch the map's displayed language live via `venue.setCurrentLocale()`, without reloading or republishing.
 - [Explore Mode](docs/features/explore-mode.md) — switch between global, exploded building "carousel" and single-floor views via `view.currentExploreMode`, in sync with the `exploremodechanged` event.
+- [Add Locale](docs/features/add-locale.md) — add a brand-new language at runtime via `venue.translator.addLocale()`, never authored in VisioMapEditor for this map.
 
 ## How it works
 

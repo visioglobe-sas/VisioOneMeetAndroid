@@ -326,6 +326,18 @@ private fun WebView.setLocale(requestId: Int, locale: String) {
 }
 
 /**
+ * Adds the `'es'` locale at runtime by calling `window.MapBridge.addSpanishLocale` in the WebView
+ * (`venue.translator.addLocale('es', resources)` under the hood, immediately followed by
+ * `venue.translator.translate(key, 'es')` for each key in that fixed dictionary). The result
+ * arrives asynchronously via `AndroidBridge.onAddLocaleResolved`, echoing [requestId] back, same
+ * convention as [WebView.getCurrentLocale]/[WebView.setLocale]. See docs/features/add-locale.md.
+ */
+private fun WebView.addSpanishLocale(requestId: Int) {
+    val script = "window.MapBridge.addSpanishLocale($requestId)"
+    evaluateJavascript(script, null)
+}
+
+/**
  * Result of a [WebView.loadCustomData] call: [requestId] echoes the value passed to that call, so
  * a stale response can be told apart from the current one, same convention as
  * [ResolvedPositionsPair]. [customData] is `null` when `placeId` didn't resolve to a POI at all
@@ -420,6 +432,36 @@ internal fun parseLocaleResultPayload(requestId: Int, json: String): LocaleResul
             requestId = requestId,
             locale = null,
             errorMessage = root.optString("message", "Could not change locale."),
+        )
+    }
+}
+
+/**
+ * Result of a [WebView.addSpanishLocale] call, carried by `AndroidBridge.onAddLocaleResolved`.
+ * [requestId] echoes the value passed to that call, same convention as [LocaleResult].
+ * [translations] maps each of `add-locale`'s fixed demo keys to the Spanish text
+ * `venue.translator.translate(key, 'es')` returned right after `addLocale('es', ...)` — non-null
+ * on success, `null` on failure with [errorMessage] then carrying its text. See
+ * docs/features/add-locale.md.
+ */
+data class AddLocaleResult(val requestId: Int, val translations: Map<String, String>?, val errorMessage: String?)
+
+/**
+ * Parses the JSON object argument of `AndroidBridge.onAddLocaleResolved`, e.g.
+ * `{"status":"ok","translations":{"search-for-anything":"Busca lo que quieras","welcome-message":"¡Bienvenido al mapa!"}}`
+ * or `{"status":"error","message":"..."}`.
+ */
+internal fun parseAddLocaleResultPayload(requestId: Int, json: String): AddLocaleResult {
+    val root = JSONObject(json)
+    return if (root.getString("status") == "ok") {
+        val translationsObj = root.getJSONObject("translations")
+        val translations = translationsObj.keys().asSequence().associateWith { key -> translationsObj.getString(key) }
+        AddLocaleResult(requestId = requestId, translations = translations, errorMessage = null)
+    } else {
+        AddLocaleResult(
+            requestId = requestId,
+            translations = null,
+            errorMessage = root.optString("message", "Could not add the locale."),
         )
     }
 }
@@ -1493,6 +1535,97 @@ fun ExploreModeOverlay(webView: WebView?, currentExploreMode: String?) {
                     Text(stringResource(labelRes))
                 }
             }
+        }
+    }
+}
+
+/**
+ * The fixed key/value dictionary demonstrated by `add-locale`, paired with a human-readable label
+ * for this overlay's before/after display: `'search-for-anything'` is one of the SDK's own
+ * predefined UI keys (see `Translator.addLocale`'s TSDoc), shown here to demonstrate that
+ * `addLocale` can override the SDK's own built-in strings; `'welcome-message'` is a custom,
+ * app-defined key the SDK itself gives no built-in meaning to, demonstrating the same store is a
+ * general-purpose one. The actual Spanish values live in `web/src/main.js`'s
+ * `ADD_LOCALE_RESOURCES` — this list only needs the keys, to render the "before" placeholder and
+ * the "after" label. See docs/features/add-locale.md.
+ */
+private val ADD_LOCALE_DEMO_KEYS = listOf(
+    "search-for-anything" to "SDK UI key: search-for-anything",
+    "welcome-message" to "Custom app key: welcome-message",
+)
+
+/**
+ * FAB-triggered control for `add-locale`: one row per [ADD_LOCALE_DEMO_KEYS] entry showing
+ * "(not added yet)" until the "Add Spanish locale" button is pressed, then the real Spanish text —
+ * this before/after contrast, not the SDK's own visible UI, is the primary proof that
+ * `venue.translator.addLocale('es', ...)` worked, since neither key changes any POI/label name on
+ * the map itself (see docs/features/add-locale.md, "Things to know"). Pressing the button calls
+ * [WebView.addSpanishLocale], which both adds the locale and immediately reads every key back via
+ * `translate` on the JS side in one round trip (`requestId` guards against a stale response, same
+ * convention as [CustomDataOverlay]/[RuntimeLocaleOverlay]) — [translations] is populated from that
+ * single response, never queried again afterward. The secondary "Switch to Spanish" button below
+ * reuses [WebView.setLocale] verbatim (`runtime-locale`'s own call), enabled only once the locale
+ * has been added — a bonus that only visibly does anything if one of the SDK's own default UI
+ * parts is on screen; it never affects POI/label names either way.
+ */
+@Composable
+fun AddLocaleOverlay(webView: WebView?, addLocaleResolved: AddLocaleResult?) {
+    var translations by remember { mutableStateOf<Map<String, String>?>(null) }
+    var pendingRequestId by remember { mutableStateOf<Int?>(null) }
+    var nextRequestId by remember { mutableStateOf(0) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+    var switchedToSpanish by remember { mutableStateOf(false) }
+
+    LaunchedEffect(addLocaleResolved) {
+        val response = addLocaleResolved ?: return@LaunchedEffect
+        if (response.requestId != pendingRequestId) return@LaunchedEffect
+        pendingRequestId = null
+        if (response.translations != null) {
+            translations = response.translations
+            errorMessage = null
+        } else {
+            errorMessage = response.errorMessage
+        }
+    }
+
+    val isAdded = translations != null
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp),
+    ) {
+        ADD_LOCALE_DEMO_KEYS.forEach { (key, label) ->
+            Text(text = label, style = MaterialTheme.typography.bodySmall)
+            Text(
+                text = translations?.get(key) ?: "(not added yet)",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+        }
+        Button(
+            onClick = {
+                errorMessage = null
+                val requestId = nextRequestId++
+                pendingRequestId = requestId
+                webView?.addSpanishLocale(requestId)
+            },
+        ) {
+            Text(if (isAdded) "Re-add Spanish locale" else "Add Spanish locale")
+        }
+        if (errorMessage != null) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(text = errorMessage.orEmpty(), color = MaterialTheme.colorScheme.error)
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        OutlinedButton(
+            onClick = {
+                switchedToSpanish = true
+                webView?.setLocale(nextRequestId++, "es")
+            },
+            enabled = isAdded,
+        ) {
+            Text(if (switchedToSpanish) "Switched to Spanish" else "Switch to Spanish")
         }
     }
 }

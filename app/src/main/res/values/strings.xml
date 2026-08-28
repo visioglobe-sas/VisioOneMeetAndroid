@@ -46,4 +46,6 @@
     <string name="explore_mode_option_global">Global</string>
     <string name="explore_mode_option_building">Building</string>
     <string name="explore_mode_option_floor">Floor</string>
+    <string name="feature_add_locale_title">Add locale</string>
+    <string name="feature_add_locale_description">Add a brand-new language at runtime that was never authored in VisioMapEditor for this map.</string>
 </resources>
