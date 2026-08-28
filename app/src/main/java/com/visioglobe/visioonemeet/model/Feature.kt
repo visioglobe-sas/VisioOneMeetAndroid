@@ -89,6 +89,11 @@ enum class Feature(
         titleRes = R.string.feature_explore_mode_title,
         descriptionRes = R.string.feature_explore_mode_description,
     ),
+    AddLocale(
+        slug = "add-locale",
+        titleRes = R.string.feature_add_locale_title,
+        descriptionRes = R.string.feature_add_locale_description,
+    ),
     ;
 
     companion object {

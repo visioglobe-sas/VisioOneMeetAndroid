@@ -66,6 +66,7 @@ data class FeatureBridgeState(
     val dynamicPoiCreated: DynamicPoiCreationResult? = null,
     val localeResolved: LocaleResult? = null,
     val currentExploreMode: String? = null,
+    val addLocaleResolved: AddLocaleResult? = null,
 )
 
 /**
@@ -115,6 +116,10 @@ data class FeatureBridgeState(
  * both report back via the same `AndroidBridge.onLocaleResolved`, surfaced via
  * [FeatureBridgeState.localeResolved]. See docs/features/runtime-locale.md.
  *
+ * `addSpanishLocale` (`add-locale`'s add-then-translate-back round trip) reports its result back via
+ * `AndroidBridge.onAddLocaleResolved`, surfaced via [FeatureBridgeState.addLocaleResolved]. See
+ * docs/features/add-locale.md.
+ *
  * `setExploreMode` (`explore-mode`'s building-exploration mode switch) has no direct response —
  * the resulting mode is reported back, like any other explore-mode change (including ones
  * triggered by map interaction, not this call), via `AndroidBridge.onExploreModeChanged`, also
@@ -151,6 +156,7 @@ fun FeatureMapScreen(
     var dynamicPoiCreated by remember { mutableStateOf<DynamicPoiCreationResult?>(null) }
     var localeResolved by remember { mutableStateOf<LocaleResult?>(null) }
     var currentExploreMode by remember { mutableStateOf<String?>(null) }
+    var addLocaleResolved by remember { mutableStateOf<AddLocaleResult?>(null) }
     val sheetState = rememberModalBottomSheetState()
 
     Scaffold(
@@ -269,6 +275,11 @@ fun FeatureMapScreen(
                                 notifyExploreModeChanged = { mode ->
                                     mainHandler.post { currentExploreMode = mode }
                                 },
+                                notifyAddLocaleResolved = { requestId, resultJson ->
+                                    mainHandler.post {
+                                        addLocaleResolved = parseAddLocaleResultPayload(requestId, resultJson)
+                                    }
+                                },
                             ),
                             "AndroidBridge",
                         )
@@ -320,6 +331,7 @@ fun FeatureMapScreen(
                     dynamicPoiCreated = dynamicPoiCreated,
                     localeResolved = localeResolved,
                     currentExploreMode = currentExploreMode,
+                    addLocaleResolved = addLocaleResolved,
                 ),
             )
         }
@@ -340,6 +352,7 @@ private class MapBridge(
     private val notifyDynamicPoiCreated: (Int, String) -> Unit,
     private val notifyLocaleResolved: (Int, String) -> Unit,
     private val notifyExploreModeChanged: (String) -> Unit,
+    private val notifyAddLocaleResolved: (Int, String) -> Unit,
 ) {
     @JavascriptInterface
     fun onMapReady() = onReady()
@@ -384,4 +397,7 @@ private class MapBridge(
 
     @JavascriptInterface
     fun onExploreModeChanged(mode: String) = notifyExploreModeChanged(mode)
+
+    @JavascriptInterface
+    fun onAddLocaleResolved(requestId: Int, resultJson: String) = notifyAddLocaleResolved(requestId, resultJson)
 }

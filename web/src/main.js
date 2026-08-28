@@ -40,6 +40,17 @@ const CATEGORY_HIGHLIGHT_COLOR = '#FF6B00';
 let dynamicPoi = null;
 let dynamicLabel = null;
 
+// Fixed key/value dictionary demonstrated by add-locale: one predefined SDK
+// UI key ('search-for-anything', overriding a string the SDK's own default
+// UI would otherwise show) and one custom, app-defined key
+// ('welcome-message', meaningless to the SDK itself — just a demo that the
+// store is a general-purpose one, usable for the app's own strings too). See
+// docs/features/add-locale.md.
+const ADD_LOCALE_RESOURCES = {
+  'search-for-anything': 'Busca lo que quieras',
+  'welcome-message': '¡Bienvenido al mapa!',
+};
+
 // Native -> JS bridge: one method per command, called from Kotlin via
 // WebView.evaluateJavascript(). Kotlin JSON-encodes arguments before
 // interpolating them into the generated script call, so what arrives here
@@ -411,6 +422,33 @@ window.MapBridge = {
       bridge?.onLocaleResolved(requestId, JSON.stringify({ status: 'ok', locale: venue.currentLocale }));
     } catch (error) {
       bridge?.onLocaleResolved(
+        requestId,
+        JSON.stringify({ status: 'error', message: String(error?.message ?? error) }),
+      );
+    }
+  },
+  // Demonstrates venue.translator.addLocale as a fully generic, i18next-backed
+  // key/value store, entirely separate from the venue's own POI/floor/
+  // building/category translation data (parsed once at load from the
+  // published map's own JSON and never touched by addLocale/translate) — see
+  // docs/features/add-locale.md, "Things to know". Adds 'es' (never authored
+  // in VisioMapEditor for this map) with ADD_LOCALE_RESOURCES above, then
+  // reads each key straight back via translator.translate so the round trip
+  // is provable without depending on any of the SDK's own UI parts being
+  // visible. addLocale itself is synchronous and, per its own TSDoc,
+  // undocumented to throw — the try/catch here is kept for
+  // forward-compatibility only, same defensive idiom as setLocale above.
+  addSpanishLocale(requestId) {
+    if (!venue) return;
+    try {
+      venue.translator.addLocale('es', ADD_LOCALE_RESOURCES);
+      const translations = {};
+      Object.keys(ADD_LOCALE_RESOURCES).forEach((key) => {
+        translations[key] = venue.translator.translate(key, 'es');
+      });
+      bridge?.onAddLocaleResolved(requestId, JSON.stringify({ status: 'ok', translations }));
+    } catch (error) {
+      bridge?.onAddLocaleResolved(
         requestId,
         JSON.stringify({ status: 'error', message: String(error?.message ?? error) }),
       );

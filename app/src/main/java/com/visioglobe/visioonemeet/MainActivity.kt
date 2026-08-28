@@ -9,6 +9,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.visioglobe.visioonemeet.model.Feature
+import com.visioglobe.visioonemeet.ui.AddLocaleOverlay
 import com.visioglobe.visioonemeet.ui.CameraLockOnPositionOverlay
 import com.visioglobe.visioonemeet.ui.CategoryHighlightOverlay
 import com.visioglobe.visioonemeet.ui.ClickableSurfaceOverlay
@@ -94,6 +95,8 @@ class MainActivity : ComponentActivity() {
                                     Feature.RuntimeLocale -> RuntimeLocaleOverlay(webView, bridgeState.localeResolved)
                                     Feature.ExploreMode ->
                                         ExploreModeOverlay(webView, bridgeState.currentExploreMode)
+                                    Feature.AddLocale ->
+                                        AddLocaleOverlay(webView, bridgeState.addLocaleResolved)
                                     null -> Unit
                                 }
                             },
