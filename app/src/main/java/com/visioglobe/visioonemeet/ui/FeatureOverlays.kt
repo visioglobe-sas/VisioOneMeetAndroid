@@ -1755,3 +1755,40 @@ fun GeofencingOverlay(
         },
     )
 }
+
+/**
+ * FAB-triggered control for `custom-base-url`: a "Base URL" field pre-filled with
+ * [currentBaseUrl] (the SDK's own real default, [DEFAULT_SDK_BASE_URL]) and a "Reload" button.
+ * Unlike every other bridge call in this file, this doesn't call anything on [webView] directly —
+ * `LoadOptions.baseURL` only takes effect when `loadVenue` runs, so there is nothing to call on an
+ * already-loaded venue. Instead [onReload] (== [FeatureBridgeState.onReloadWithBaseUrl]) tells
+ * [FeatureMapScreen] to fully recreate the WebView against the new value — see that function's
+ * kdoc. The two outcomes both surface through [FeatureMapScreen]'s own existing loading/error UI,
+ * not a message rendered here: the default URL reloading successfully proves the parameter is
+ * genuinely wired through (it's the same value the SDK would use anyway), and a garbage URL
+ * reloading into the existing "Impossible de charger la carte VisioOne" error banner — with the
+ * SDK's own `VenueNotFoundError` message — is the same "error state as a valid demo outcome"
+ * idiom already used by `custom-data`/`dynamic-poi-crud`/`goto-poi`. See
+ * docs/features/custom-base-url.md.
+ */
+@Composable
+fun CustomBaseUrlOverlay(currentBaseUrl: String, onReload: (String) -> Unit) {
+    var baseUrl by remember { mutableStateOf(currentBaseUrl) }
+
+    Column(modifier = Modifier.padding(16.dp)) {
+        OutlinedTextField(
+            value = baseUrl,
+            onValueChange = { baseUrl = it },
+            label = { Text("Base URL") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Button(
+            onClick = { onReload(baseUrl.trim()) },
+            enabled = baseUrl.isNotBlank(),
+        ) {
+            Text("Reload")
+        }
+    }
+}

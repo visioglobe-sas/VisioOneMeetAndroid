@@ -99,6 +99,11 @@ enum class Feature(
         titleRes = R.string.feature_geofencing_title,
         descriptionRes = R.string.feature_geofencing_description,
     ),
+    CustomBaseUrl(
+        slug = "custom-base-url",
+        titleRes = R.string.feature_custom_base_url_title,
+        descriptionRes = R.string.feature_custom_base_url_description,
+    ),
     ;
 
     companion object {

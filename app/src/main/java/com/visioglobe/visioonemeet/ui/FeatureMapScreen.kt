@@ -24,6 +24,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -36,8 +37,16 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.webkit.WebViewAssetLoader
 import com.visioglobe.visioonemeet.R
+import java.net.URLEncoder
 
 private const val ASSET_LOADER_DOMAIN = "appassets.androidx.local"
+
+/**
+ * The VisioOne SDK's own default `LoadOptions.baseURL` (confirmed by reading the SDK source) —
+ * used here as the pre-filled value for [CustomBaseUrlOverlay], and as the query param value every
+ * other screen implicitly sends, so nothing changes for them. See docs/features/custom-base-url.md.
+ */
+const val DEFAULT_SDK_BASE_URL = "https://mapserver.visioglobe.com/"
 
 private sealed interface MapLoadState {
     data object Loading : MapLoadState
@@ -69,6 +78,8 @@ data class FeatureBridgeState(
     val addLocaleResolved: AddLocaleResult? = null,
     val zoneResolved: ZoneResolution? = null,
     val isInsideGeofenceZone: Boolean = false,
+    val currentBaseUrl: String = DEFAULT_SDK_BASE_URL,
+    val onReloadWithBaseUrl: (String) -> Unit = {},
 )
 
 /**
@@ -134,6 +145,14 @@ data class FeatureBridgeState(
  * pushed once unprompted right after the map loads so the control has a correct initial highlight.
  * Surfaced via [FeatureBridgeState.currentExploreMode]. See docs/features/explore-mode.md.
  *
+ * [FeatureBridgeState.currentBaseUrl]/[FeatureBridgeState.onReloadWithBaseUrl] back `custom-base-url`:
+ * unlike every other bridge call, `LoadOptions.baseURL` cannot be changed on an already-loaded venue
+ * — it only takes effect when `loadVenue` runs, so "Reload" here means fully recreating the WebView
+ * against a new `?baseUrl=` query param, not calling a JS setter. [key] around the [AndroidView] call
+ * does that: changing [currentBaseUrl] gives the underlying node a new identity, so Compose disposes
+ * the old WebView and runs `factory` again from scratch. Every other screen just keeps using the
+ * default value, so nothing changes for them. See docs/features/custom-base-url.md.
+ *
  * [onMapReady] fires once, right after [MapLoadState.Ready] is reached, with the live [WebView] —
  * for a screen that needs to drive the bridge before the visitor ever opens the FAB's bottom
  * sheet. `native-ui-replacement` is the only user of it today: it hides the SDK's own default
@@ -167,6 +186,7 @@ fun FeatureMapScreen(
     var addLocaleResolved by remember { mutableStateOf<AddLocaleResult?>(null) }
     var zoneResolved by remember { mutableStateOf<ZoneResolution?>(null) }
     var isInsideGeofenceZone by remember { mutableStateOf(false) }
+    var currentBaseUrl by remember { mutableStateOf(DEFAULT_SDK_BASE_URL) }
     val sheetState = rememberModalBottomSheetState()
 
     Scaffold(
@@ -200,119 +220,125 @@ fun FeatureMapScreen(
                 .fillMaxSize()
                 .padding(innerPadding),
         ) {
-            AndroidView(
-                modifier = Modifier.fillMaxSize(),
-                factory = { context ->
-                    val assetLoader = WebViewAssetLoader.Builder()
-                        .setDomain(ASSET_LOADER_DOMAIN)
-                        .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(context))
-                        .build()
+            key(mapHash, currentBaseUrl) {
+                AndroidView(
+                    modifier = Modifier.fillMaxSize(),
+                    factory = { context ->
+                        val assetLoader = WebViewAssetLoader.Builder()
+                            .setDomain(ASSET_LOADER_DOMAIN)
+                            .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(context))
+                            .build()
 
-                    WebView(context).apply {
-                        layoutParams = ViewGroup.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT,
-                            ViewGroup.LayoutParams.MATCH_PARENT,
-                        )
+                        WebView(context).apply {
+                            layoutParams = ViewGroup.LayoutParams(
+                                ViewGroup.LayoutParams.MATCH_PARENT,
+                                ViewGroup.LayoutParams.MATCH_PARENT,
+                            )
 
-                        settings.javaScriptEnabled = true
-                        settings.domStorageEnabled = true
-                        settings.mediaPlaybackRequiresUserGesture = false
+                            settings.javaScriptEnabled = true
+                            settings.domStorageEnabled = true
+                            settings.mediaPlaybackRequiresUserGesture = false
 
-                        addJavascriptInterface(
-                            MapBridge(
-                                onReady = {
-                                    mainHandler.post {
-                                        loadState = MapLoadState.Ready
-                                        webView?.let(onMapReady)
-                                    }
-                                },
-                                onError = { message -> mainHandler.post { loadState = MapLoadState.Error(message) } },
-                                notifyPoiClick = { payload ->
-                                    if (reactsToPoiClicks) {
+                            addJavascriptInterface(
+                                MapBridge(
+                                    onReady = {
                                         mainHandler.post {
-                                            lastPoiClick = parsePoiClickPayload(payload)
-                                            showControls = true
+                                            loadState = MapLoadState.Ready
+                                            webView?.let(onMapReady)
                                         }
-                                    }
-                                },
-                                notifyFloorsReady = { payload ->
-                                    mainHandler.post { floorSelector = parseFloorsReadyPayload(payload) }
-                                },
-                                notifyFloorChanged = { floorId ->
-                                    mainHandler.post { floorSelector = floorSelector.copy(currentFloorId = floorId) }
-                                },
-                                notifyNavigationComputed = {
-                                    mainHandler.post { navigationError = null }
-                                },
-                                notifyNavigationError = { message ->
-                                    mainHandler.post { navigationError = message }
-                                },
-                                notifyPositionsResolved = { requestId, originJson, destinationJson ->
-                                    mainHandler.post {
-                                        positionsResolved = ResolvedPositionsPair(
-                                            requestId = requestId,
-                                            origin = parseResolvedPosition(originJson),
-                                            destination = parseResolvedPosition(destinationJson),
-                                        )
-                                    }
-                                },
-                                notifyCustomDataLoaded = { requestId, customDataJson ->
-                                    mainHandler.post {
-                                        customDataLoaded = CustomDataResult(
-                                            requestId = requestId,
-                                            customData = parseCustomDataPayload(customDataJson),
-                                        )
-                                    }
-                                },
-                                notifyCategoriesLoaded = { requestId, categoriesJson ->
-                                    mainHandler.post {
-                                        categoriesLoaded = CategoriesResult(
-                                            requestId = requestId,
-                                            categories = parseCategoriesPayload(categoriesJson),
-                                        )
-                                    }
-                                },
-                                notifyDynamicPoiCreated = { requestId, resultJson ->
-                                    mainHandler.post {
-                                        dynamicPoiCreated = parseDynamicPoiCreationPayload(requestId, resultJson)
-                                    }
-                                },
-                                notifyLocaleResolved = { requestId, resultJson ->
-                                    mainHandler.post {
-                                        localeResolved = parseLocaleResultPayload(requestId, resultJson)
-                                    }
-                                },
-                                notifyExploreModeChanged = { mode ->
-                                    mainHandler.post { currentExploreMode = mode }
-                                },
-                                notifyAddLocaleResolved = { requestId, resultJson ->
-                                    mainHandler.post {
-                                        addLocaleResolved = parseAddLocaleResultPayload(requestId, resultJson)
-                                    }
-                                },
-                                notifyZoneResolved = { requestId, status ->
-                                    mainHandler.post {
-                                        zoneResolved = ZoneResolution(requestId = requestId, status = status)
-                                    }
-                                },
-                                notifyGeofenceStateChanged = { isInside ->
-                                    mainHandler.post { isInsideGeofenceZone = isInside }
-                                },
-                            ),
-                            "AndroidBridge",
-                        )
+                                    },
+                                    onError = { message -> mainHandler.post { loadState = MapLoadState.Error(message) } },
+                                    notifyPoiClick = { payload ->
+                                        if (reactsToPoiClicks) {
+                                            mainHandler.post {
+                                                lastPoiClick = parsePoiClickPayload(payload)
+                                                showControls = true
+                                            }
+                                        }
+                                    },
+                                    notifyFloorsReady = { payload ->
+                                        mainHandler.post { floorSelector = parseFloorsReadyPayload(payload) }
+                                    },
+                                    notifyFloorChanged = { floorId ->
+                                        mainHandler.post { floorSelector = floorSelector.copy(currentFloorId = floorId) }
+                                    },
+                                    notifyNavigationComputed = {
+                                        mainHandler.post { navigationError = null }
+                                    },
+                                    notifyNavigationError = { message ->
+                                        mainHandler.post { navigationError = message }
+                                    },
+                                    notifyPositionsResolved = { requestId, originJson, destinationJson ->
+                                        mainHandler.post {
+                                            positionsResolved = ResolvedPositionsPair(
+                                                requestId = requestId,
+                                                origin = parseResolvedPosition(originJson),
+                                                destination = parseResolvedPosition(destinationJson),
+                                            )
+                                        }
+                                    },
+                                    notifyCustomDataLoaded = { requestId, customDataJson ->
+                                        mainHandler.post {
+                                            customDataLoaded = CustomDataResult(
+                                                requestId = requestId,
+                                                customData = parseCustomDataPayload(customDataJson),
+                                            )
+                                        }
+                                    },
+                                    notifyCategoriesLoaded = { requestId, categoriesJson ->
+                                        mainHandler.post {
+                                            categoriesLoaded = CategoriesResult(
+                                                requestId = requestId,
+                                                categories = parseCategoriesPayload(categoriesJson),
+                                            )
+                                        }
+                                    },
+                                    notifyDynamicPoiCreated = { requestId, resultJson ->
+                                        mainHandler.post {
+                                            dynamicPoiCreated = parseDynamicPoiCreationPayload(requestId, resultJson)
+                                        }
+                                    },
+                                    notifyLocaleResolved = { requestId, resultJson ->
+                                        mainHandler.post {
+                                            localeResolved = parseLocaleResultPayload(requestId, resultJson)
+                                        }
+                                    },
+                                    notifyExploreModeChanged = { mode ->
+                                        mainHandler.post { currentExploreMode = mode }
+                                    },
+                                    notifyAddLocaleResolved = { requestId, resultJson ->
+                                        mainHandler.post {
+                                            addLocaleResolved = parseAddLocaleResultPayload(requestId, resultJson)
+                                        }
+                                    },
+                                    notifyZoneResolved = { requestId, status ->
+                                        mainHandler.post {
+                                            zoneResolved = ZoneResolution(requestId = requestId, status = status)
+                                        }
+                                    },
+                                    notifyGeofenceStateChanged = { isInside ->
+                                        mainHandler.post { isInsideGeofenceZone = isInside }
+                                    },
+                                ),
+                                "AndroidBridge",
+                            )
 
-                        webViewClient = object : WebViewClient() {
-                            override fun shouldInterceptRequest(
-                                view: WebView,
-                                request: WebResourceRequest,
-                            ): WebResourceResponse? = assetLoader.shouldInterceptRequest(request.url)
-                        }
+                            webViewClient = object : WebViewClient() {
+                                override fun shouldInterceptRequest(
+                                    view: WebView,
+                                    request: WebResourceRequest,
+                                ): WebResourceResponse? = assetLoader.shouldInterceptRequest(request.url)
+                            }
 
-                        loadUrl("https://$ASSET_LOADER_DOMAIN/assets/www/index.html?hash=$mapHash")
-                    }.also { webView = it }
-                },
-            )
+                            val encodedBaseUrl = URLEncoder.encode(currentBaseUrl, "UTF-8")
+                            loadUrl(
+                                "https://$ASSET_LOADER_DOMAIN/assets/www/index.html" +
+                                    "?hash=$mapHash&baseUrl=$encodedBaseUrl",
+                            )
+                        }.also { webView = it }
+                    },
+                )
+            }
 
             when (val state = loadState) {
                 is MapLoadState.Loading -> CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
@@ -352,6 +378,11 @@ fun FeatureMapScreen(
                     addLocaleResolved = addLocaleResolved,
                     zoneResolved = zoneResolved,
                     isInsideGeofenceZone = isInsideGeofenceZone,
+                    currentBaseUrl = currentBaseUrl,
+                    onReloadWithBaseUrl = { newBaseUrl ->
+                        loadState = MapLoadState.Loading
+                        currentBaseUrl = newBaseUrl
+                    },
                 ),
             )
         }

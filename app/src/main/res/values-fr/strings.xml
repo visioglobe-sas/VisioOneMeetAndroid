@@ -49,4 +49,6 @@
     <string name="feature_add_locale_description">Ajouter à la volée une langue jamais paramétrée dans VisioMapEditor pour cette carte.</string>
     <string name="feature_geofencing_title">Geofencing</string>
     <string name="feature_geofencing_description">Déclencher une alerte visuelle quand une position simulée entre dans une zone définie par la surface d\'un POI.</string>
+    <string name="feature_custom_base_url_title">Serveur de carte configurable</string>
+    <string name="feature_custom_base_url_description">Pointer le SDK vers un autre serveur de cartes que le SaaS Visioglobe par défaut.</string>
 </resources>
