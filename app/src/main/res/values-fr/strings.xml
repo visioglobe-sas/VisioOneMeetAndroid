@@ -47,4 +47,6 @@
     <string name="explore_mode_option_floor">Étage</string>
     <string name="feature_add_locale_title">Ajout de langue</string>
     <string name="feature_add_locale_description">Ajouter à la volée une langue jamais paramétrée dans VisioMapEditor pour cette carte.</string>
+    <string name="feature_geofencing_title">Geofencing</string>
+    <string name="feature_geofencing_description">Déclencher une alerte visuelle quand une position simulée entre dans une zone définie par la surface d\'un POI.</string>
 </resources>

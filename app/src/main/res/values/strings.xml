@@ -48,4 +48,6 @@
     <string name="explore_mode_option_floor">Floor</string>
     <string name="feature_add_locale_title">Add locale</string>
     <string name="feature_add_locale_description">Add a brand-new language at runtime that was never authored in VisioMapEditor for this map.</string>
+    <string name="feature_geofencing_title">Geofencing</string>
+    <string name="feature_geofencing_description">Trigger a visual alert when a simulated tracked position enters a zone defined by a POI\'s surface.</string>
 </resources>

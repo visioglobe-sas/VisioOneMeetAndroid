@@ -61,6 +61,7 @@ Each feature below is a self-contained screen in the app demonstrating one Visio
 - [Runtime Locale](docs/features/runtime-locale.md) — switch the map's displayed language live via `venue.setCurrentLocale()`, without reloading or republishing.
 - [Explore Mode](docs/features/explore-mode.md) — switch between global, exploded building "carousel" and single-floor views via `view.currentExploreMode`, in sync with the `exploremodechanged` event.
 - [Add Locale](docs/features/add-locale.md) — add a brand-new language at runtime via `venue.translator.addLocale()`, never authored in VisioMapEditor for this map.
+- [Geofencing](docs/features/geofencing.md) — trigger a visual alert when a simulated tracked position enters a zone defined by a POI's surface, via a hand-rolled point-in-polygon check against `Surface.positions`.
 
 ## How it works
 

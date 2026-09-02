@@ -94,6 +94,11 @@ enum class Feature(
         titleRes = R.string.feature_add_locale_title,
         descriptionRes = R.string.feature_add_locale_description,
     ),
+    Geofencing(
+        slug = "geofencing",
+        titleRes = R.string.feature_geofencing_title,
+        descriptionRes = R.string.feature_geofencing_description,
+    ),
     ;
 
     companion object {
