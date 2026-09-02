@@ -14,6 +14,7 @@ import com.visioglobe.visioonemeet.ui.CameraLockOnPositionOverlay
 import com.visioglobe.visioonemeet.ui.CategoryHighlightOverlay
 import com.visioglobe.visioonemeet.ui.ClickableSurfaceOverlay
 import com.visioglobe.visioonemeet.ui.ComputeNavigationOverlay
+import com.visioglobe.visioonemeet.ui.CustomBaseUrlOverlay
 import com.visioglobe.visioonemeet.ui.CustomDataOverlay
 import com.visioglobe.visioonemeet.ui.DynamicPoiCrudOverlay
 import com.visioglobe.visioonemeet.ui.ExploreModeOverlay
@@ -103,6 +104,10 @@ class MainActivity : ComponentActivity() {
                                         bridgeState.positionsResolved,
                                         bridgeState.zoneResolved,
                                         bridgeState.isInsideGeofenceZone,
+                                    )
+                                    Feature.CustomBaseUrl -> CustomBaseUrlOverlay(
+                                        bridgeState.currentBaseUrl,
+                                        bridgeState.onReloadWithBaseUrl,
                                     )
                                     null -> Unit
                                 }

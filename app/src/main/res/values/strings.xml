@@ -50,4 +50,6 @@
     <string name="feature_add_locale_description">Add a brand-new language at runtime that was never authored in VisioMapEditor for this map.</string>
     <string name="feature_geofencing_title">Geofencing</string>
     <string name="feature_geofencing_description">Trigger a visual alert when a simulated tracked position enters a zone defined by a POI\'s surface.</string>
+    <string name="feature_custom_base_url_title">Custom map server</string>
+    <string name="feature_custom_base_url_description">Point the SDK at a different map server than the Visioglobe SaaS default.</string>
 </resources>

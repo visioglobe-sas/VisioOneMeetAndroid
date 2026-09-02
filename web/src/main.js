@@ -5,6 +5,13 @@ import { createVisioOne } from '@visioglobe/visioone';
 const DEFAULT_HASH = 'kbae8e6c066cca4b02c2afac2bc963a643d87437a';
 const hash = new URLSearchParams(window.location.search).get('hash') || DEFAULT_HASH;
 
+// `custom-base-url`: the SDK's own default `LoadOptions.baseURL` (confirmed by reading the SDK
+// source), used whenever the app doesn't append a `?baseUrl=` override (every screen except that
+// feature's) — so this is a no-op for every other feature, not just a fallback. See
+// docs/features/custom-base-url.md.
+const DEFAULT_BASE_URL = 'https://mapserver.visioglobe.com/';
+const baseURL = new URLSearchParams(window.location.search).get('baseUrl') || DEFAULT_BASE_URL;
+
 const container = document.querySelector('#content');
 
 // Optional bridge injected by MainActivity via WebView.addJavascriptInterface,
@@ -616,7 +623,7 @@ function onPoiClick(event) {
 async function main() {
   try {
     const visioOne = createVisioOne();
-    venue = await visioOne.loadVenue({ hash });
+    venue = await visioOne.loadVenue({ hash, baseURL });
     view = await visioOne.createView(container, venue);
     view.addEventListener('poiclick', onPoiClick);
     view.addEventListener('currentfloorchanged', onCurrentFloorChanged);
