@@ -199,6 +199,33 @@ window.MapBridge = {
     venue.removeNavigationTrace(currentNavigationTrace);
     currentNavigationTrace = null;
   },
+  // `custom-navigation-trace`: restyles the trace currently drawn by
+  // computeNavigation via venue.updateNavigationTrace(trace, options) — an
+  // SDK call this bridge otherwise doesn't expose (only create/set/remove
+  // above were wired for computeNavigation). A no-op if no trace is
+  // currently displayed — colors only affect a trace that already exists,
+  // same convention as the other MapBridge commands that resolve a
+  // currently-tracked entity (clearNavigation above, clearPlace,
+  // clearZone). `options` is a NavigationTraceUpdateOptions object (colors
+  // only, see NavigationTraceUpdateOptions.d.ts): progressColor,
+  // progressOutlineColor, progressFutureColor, previewColor,
+  // previewOutlineColor.
+  //
+  // venue.updateNavigationTrace() throws internally (TypeError: Cannot read
+  // properties of undefined (reading 'material'), deep in the SDK's own
+  // line-rendering pipeline) on this shared demo venue — yet every color in
+  // `options` is still applied correctly before it throws. Not our bug to
+  // fix — caught here so it doesn't surface as an uncaught error on the
+  // bridge call; the color change is treated as applied regardless of
+  // whether it throws. See docs/features/custom-navigation-trace.md.
+  updateNavigationTraceStyle(options) {
+    if (!venue || !currentNavigationTrace) return;
+    try {
+      venue.updateNavigationTrace(currentNavigationTrace, options);
+    } catch (error) {
+      console.warn('updateNavigationTrace threw (trace styling still applied):', error);
+    }
+  },
   // Shows/hides one of the SDK's own default UI overlays via
   // view.setUIPartVisible. uiPart is one of exactly 5 case-sensitive values
   // ('floorSelector', 'navigation', 'poiDetails', 'search', 'userTracking' —

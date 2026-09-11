@@ -16,6 +16,7 @@ import com.visioglobe.visioonemeet.ui.ClickableSurfaceOverlay
 import com.visioglobe.visioonemeet.ui.ComputeNavigationOverlay
 import com.visioglobe.visioonemeet.ui.CustomBaseUrlOverlay
 import com.visioglobe.visioonemeet.ui.CustomDataOverlay
+import com.visioglobe.visioonemeet.ui.CustomNavigationTraceOverlay
 import com.visioglobe.visioonemeet.ui.DynamicPoiCrudOverlay
 import com.visioglobe.visioonemeet.ui.ExploreModeOverlay
 import com.visioglobe.visioonemeet.ui.FeatureMapScreen
@@ -109,6 +110,8 @@ class MainActivity : ComponentActivity() {
                                         bridgeState.currentBaseUrl,
                                         bridgeState.onReloadWithBaseUrl,
                                     )
+                                    Feature.CustomNavigationTrace ->
+                                        CustomNavigationTraceOverlay(webView, bridgeState.navigationError)
                                     null -> Unit
                                 }
                             },

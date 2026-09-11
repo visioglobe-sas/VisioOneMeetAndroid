@@ -1,6 +1,10 @@
 package com.visioglobe.visioonemeet.ui
 
 import android.webkit.WebView
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
@@ -8,7 +12,9 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -28,6 +34,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.visioglobe.visioonemeet.R
@@ -121,6 +129,76 @@ private fun WebView.computeNavigation(origin: String, destination: String, isAcc
 /** Removes the route drawn by [computeNavigation], if any. See docs/features/compute-navigation.md. */
 private fun WebView.clearNavigation() {
     evaluateJavascript("window.MapBridge.clearNavigation()", null)
+}
+
+/**
+ * A `NavigationTraceUpdateOptions` payload (colors only — `displayMode`/`thickness` can't be
+ * changed after a trace is created, see NavigationTraceUpdateOptions.d.ts), one of
+ * [NAVIGATION_TRACE_PRESETS]. See docs/features/custom-navigation-trace.md.
+ */
+private data class NavigationTraceColors(
+    val progressColor: String,
+    val progressOutlineColor: String,
+    val progressFutureColor: String,
+    val previewColor: String,
+    val previewOutlineColor: String,
+)
+
+/**
+ * `custom-navigation-trace`'s color catalogue, each a full [NavigationTraceColors] payload applied
+ * via [WebView.updateNavigationTraceStyle] (`venue.updateNavigationTrace()` under the hood).
+ * `visioglobeBlue` restates the SDK's own documented `Line` defaults (`progressColor` `#0094F0`,
+ * the inactive/preview segments `#C5C5C5`) as an explicit preset rather than a fake "reset" — there
+ * is no SDK call to revert to default once changed. Same 4 presets as the Vue/iOS/Flutter/React
+ * Native siblings, so the catalogue stays consistent across platforms. See
+ * docs/features/custom-navigation-trace.md.
+ */
+private val NAVIGATION_TRACE_PRESETS = linkedMapOf(
+    "visioglobeBlue" to NavigationTraceColors(
+        progressColor = "#0094F0",
+        progressOutlineColor = "#FFFFFF",
+        progressFutureColor = "#C5C5C5",
+        previewColor = "#C5C5C5",
+        previewOutlineColor = "#FFFFFF",
+    ),
+    "brandRed" to NavigationTraceColors(
+        progressColor = "#E53935",
+        progressOutlineColor = "#FFFFFF",
+        progressFutureColor = "#F8C9C7",
+        previewColor = "#F8C9C7",
+        previewOutlineColor = "#FFFFFF",
+    ),
+    "brandGreen" to NavigationTraceColors(
+        progressColor = "#2E7D32",
+        progressOutlineColor = "#FFFFFF",
+        progressFutureColor = "#C8E6C9",
+        previewColor = "#C8E6C9",
+        previewOutlineColor = "#FFFFFF",
+    ),
+    "brandPurple" to NavigationTraceColors(
+        progressColor = "#6A1B9A",
+        progressOutlineColor = "#FFFFFF",
+        progressFutureColor = "#E1BEE7",
+        previewColor = "#E1BEE7",
+        previewOutlineColor = "#FFFFFF",
+    ),
+)
+
+/**
+ * Restyles the trace currently drawn by [computeNavigation] by calling
+ * `window.MapBridge.updateNavigationTraceStyle` in the WebView (`venue.updateNavigationTrace()`
+ * under the hood). A no-op if no trace is currently displayed. See
+ * docs/features/custom-navigation-trace.md.
+ */
+private fun WebView.updateNavigationTraceStyle(colors: NavigationTraceColors) {
+    val options = JSONObject().apply {
+        put("progressColor", colors.progressColor)
+        put("progressOutlineColor", colors.progressOutlineColor)
+        put("progressFutureColor", colors.progressFutureColor)
+        put("previewColor", colors.previewColor)
+        put("previewOutlineColor", colors.previewOutlineColor)
+    }
+    evaluateJavascript("window.MapBridge.updateNavigationTraceStyle($options)", null)
 }
 
 /**
@@ -771,6 +849,97 @@ fun ComputeNavigationOverlay(webView: WebView?, navigationError: String?) {
             Spacer(modifier = Modifier.height(8.dp))
             Text(text = navigationError, color = MaterialTheme.colorScheme.error)
         }
+    }
+}
+
+/**
+ * FAB-triggered control for `custom-navigation-trace`: reuses `compute-navigation`'s itinerary
+ * fields/buttons verbatim ([WebView.computeNavigation]/[WebView.clearNavigation], same
+ * `navigationError` surfacing) rather than duplicating that logic, then adds a row of color
+ * swatches below — one per [NAVIGATION_TRACE_PRESETS] entry — applying [WebView.updateNavigationTraceStyle]
+ * (`venue.updateNavigationTrace()` under the hood). Tapping a swatch restyles whatever trace is
+ * currently displayed immediately (a no-op if none is), same convention as
+ * [CameraLockOnPositionOverlay] reusing `simulated-position`'s tracking loop instead of duplicating
+ * it. The selected preset is remembered ([selectedPresetKey]) so the next "Itinerary" press
+ * restyles the freshly computed trace too — the SDK only lets a trace be built in its own default
+ * look, so this second call is always needed for anything but the default. See
+ * docs/features/custom-navigation-trace.md.
+ */
+@Composable
+fun CustomNavigationTraceOverlay(webView: WebView?, navigationError: String?) {
+    var origin by remember { mutableStateOf("") }
+    var destination by remember { mutableStateOf("") }
+    var selectedPresetKey by remember { mutableStateOf(NAVIGATION_TRACE_PRESETS.keys.first()) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp),
+    ) {
+        Row(modifier = Modifier.fillMaxWidth()) {
+            OutlinedTextField(
+                value = origin,
+                onValueChange = { origin = it },
+                label = { Text("From (place ID)") },
+                singleLine = true,
+                modifier = Modifier.weight(1f),
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            OutlinedTextField(
+                value = destination,
+                onValueChange = { destination = it },
+                label = { Text("To (place ID)") },
+                singleLine = true,
+                modifier = Modifier.weight(1f),
+            )
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        Row(modifier = Modifier.fillMaxWidth()) {
+            Button(
+                onClick = {
+                    webView?.computeNavigation(origin.trim(), destination.trim(), false)
+                    webView?.updateNavigationTraceStyle(NAVIGATION_TRACE_PRESETS.getValue(selectedPresetKey))
+                },
+                enabled = origin.isNotBlank() && destination.isNotBlank(),
+            ) {
+                Text("Itinerary")
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            Button(onClick = { webView?.clearNavigation() }) {
+                Text("Clear")
+            }
+        }
+        if (navigationError != null) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(text = navigationError, color = MaterialTheme.colorScheme.error)
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+        Text(text = "Trace color", style = MaterialTheme.typography.titleSmall)
+        Spacer(modifier = Modifier.height(8.dp))
+        Row(modifier = Modifier.fillMaxWidth()) {
+            NAVIGATION_TRACE_PRESETS.forEach { (presetKey, colors) ->
+                val isSelected = presetKey == selectedPresetKey
+                Box(
+                    modifier = Modifier
+                        .padding(end = 12.dp)
+                        .size(40.dp)
+                        .clip(CircleShape)
+                        .background(Color(android.graphics.Color.parseColor(colors.progressColor)))
+                        .border(
+                            width = if (isSelected) 3.dp else 1.dp,
+                            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+                            shape = CircleShape,
+                        )
+                        .clickable {
+                            selectedPresetKey = presetKey
+                            webView?.updateNavigationTraceStyle(colors)
+                        },
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(text = selectedPresetKey, style = MaterialTheme.typography.bodySmall)
     }
 }
 

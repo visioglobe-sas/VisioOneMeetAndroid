@@ -104,6 +104,11 @@ enum class Feature(
         titleRes = R.string.feature_custom_base_url_title,
         descriptionRes = R.string.feature_custom_base_url_description,
     ),
+    CustomNavigationTrace(
+        slug = "custom-navigation-trace",
+        titleRes = R.string.feature_custom_navigation_trace_title,
+        descriptionRes = R.string.feature_custom_navigation_trace_description,
+    ),
     ;
 
     companion object {
