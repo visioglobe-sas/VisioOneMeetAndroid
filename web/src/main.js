@@ -199,6 +199,36 @@ window.MapBridge = {
     venue.removeNavigationTrace(currentNavigationTrace);
     currentNavigationTrace = null;
   },
+  // `navigation-exclude-modalities`: same request shape as computeNavigation above, plus an
+  // optional `excludedAttributes` list — segment particularities (elevator/stairs/etc., see the
+  // SDK's NavigationRequest.d.ts) the computed route must avoid. On this shared demo venue the
+  // elevator segment's attribute string is 'lift' (NOT 'elevator', despite the SDK's own
+  // misleading JSDoc comment on `excludedAttributes` — confirmed live against a real venue, see
+  // docs/features/navigation-exclude-modalities.md). An empty array (excludeElevator === false)
+  // behaves exactly like a plain computeNavigation call. Reuses the same
+  // onNavigationComputed/onNavigationError reporting and try/catch as computeNavigation — a route
+  // that only exists through the excluded attribute fails the exact same way as any other
+  // unreachable pair (InvalidNavigationRequestError).
+  computeNavigationExcludingModalities(origin, destination, isAccessible, excludeElevator) {
+    if (!venue || !view) return;
+    this.clearNavigation();
+    try {
+      const navigation = venue.computeNavigation({
+        origin,
+        destination,
+        isAccessible,
+        type: 'fastest',
+        firstNodeAsIntersection: false,
+        mergeFloorChangeInstructions: false,
+        excludedAttributes: excludeElevator ? ['lift'] : [],
+      });
+      currentNavigationTrace = venue.createNavigationTrace(navigation);
+      view.setCurrentNavigationTrace(currentNavigationTrace);
+      bridge?.onNavigationComputed();
+    } catch (error) {
+      bridge?.onNavigationError(String(error?.message ?? error));
+    }
+  },
   // `custom-navigation-trace`: restyles the trace currently drawn by
   // computeNavigation via venue.updateNavigationTrace(trace, options) — an
   // SDK call this bridge otherwise doesn't expose (only create/set/remove

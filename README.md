@@ -64,6 +64,7 @@ Each feature below is a self-contained screen in the app demonstrating one Visio
 - [Geofencing](docs/features/geofencing.md) — trigger a visual alert when a simulated tracked position enters a zone defined by a POI's surface, via a hand-rolled point-in-polygon check against `Surface.positions`.
 - [Custom Map Server](docs/features/custom-base-url.md) — point the SDK at a different map server than the Visioglobe SaaS default via `LoadOptions.baseURL`, reloading the venue from scratch to apply it.
 - [Custom Navigation Trace](docs/features/custom-navigation-trace.md) — restyle the route line drawn by Compute Navigation with a chosen color palette via `venue.updateNavigationTrace()`.
+- [Exclude Navigation Modalities](docs/features/navigation-exclude-modalities.md) — compute a route that avoids the elevator via `venue.computeNavigation()`'s `excludedAttributes` option.
 
 ## How it works
 
