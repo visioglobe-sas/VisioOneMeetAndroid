@@ -132,6 +132,28 @@ private fun WebView.clearNavigation() {
 }
 
 /**
+ * Computes and draws a route between [origin] and [destination], optionally routing around
+ * elevators, by calling `window.MapBridge.computeNavigationExcludingModalities` in the WebView
+ * (`venue.computeNavigation()`'s `excludedAttributes` option under the hood — `['lift']` when
+ * [excludeElevator] is true, `[]` otherwise). Same request shape, error surfacing
+ * (`onNavigationError`/`onNavigationComputed`) and try/catch as [computeNavigation] — this is a
+ * separate bridge method rather than a change to [computeNavigation]'s signature so its two
+ * existing call sites ([ComputeNavigationOverlay]/[CustomNavigationTraceOverlay]) don't need
+ * touching, same convention as [WebView.updateNavigationTraceStyle]. See
+ * docs/features/navigation-exclude-modalities.md.
+ */
+private fun WebView.computeNavigationExcludingModalities(
+    origin: String,
+    destination: String,
+    isAccessible: Boolean,
+    excludeElevator: Boolean,
+) {
+    val script = "window.MapBridge.computeNavigationExcludingModalities(" +
+        "${JSONObject.quote(origin)}, ${JSONObject.quote(destination)}, $isAccessible, $excludeElevator)"
+    evaluateJavascript(script, null)
+}
+
+/**
  * A `NavigationTraceUpdateOptions` payload (colors only — `displayMode`/`thickness` can't be
  * changed after a trace is created, see NavigationTraceUpdateOptions.d.ts), one of
  * [NAVIGATION_TRACE_PRESETS]. See docs/features/custom-navigation-trace.md.
@@ -940,6 +962,84 @@ fun CustomNavigationTraceOverlay(webView: WebView?, navigationError: String?) {
         }
         Spacer(modifier = Modifier.height(4.dp))
         Text(text = selectedPresetKey, style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+/**
+ * FAB-triggered control for `navigation-exclude-modalities`: reuses `compute-navigation`'s
+ * itinerary fields/buttons verbatim ([WebView.computeNavigation] replaced by
+ * [WebView.computeNavigationExcludingModalities], same `navigationError` surfacing) rather than
+ * duplicating that logic, then adds a single switch below, "Avoid elevator" — same reuse pattern
+ * as [CustomNavigationTraceOverlay] adding its color row below the same fields. Unlike that
+ * switch-per-toggle in [UiPartVisibilityOverlay], [excludeElevator] is only read when "Itinerary"
+ * is pressed, not applied live on toggle: there is no already-drawn trace to react to (toggling
+ * mid-display would require recomputing anyway), so recomputing immediately would just be a more
+ * surprising way to do the same thing "Itinerary" already does explicitly. See
+ * docs/features/navigation-exclude-modalities.md.
+ */
+@Composable
+fun NavigationExcludeModalitiesOverlay(webView: WebView?, navigationError: String?) {
+    var origin by remember { mutableStateOf("") }
+    var destination by remember { mutableStateOf("") }
+    var excludeElevator by remember { mutableStateOf(false) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp),
+    ) {
+        Row(modifier = Modifier.fillMaxWidth()) {
+            OutlinedTextField(
+                value = origin,
+                onValueChange = { origin = it },
+                label = { Text("From (place ID)") },
+                singleLine = true,
+                modifier = Modifier.weight(1f),
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            OutlinedTextField(
+                value = destination,
+                onValueChange = { destination = it },
+                label = { Text("To (place ID)") },
+                singleLine = true,
+                modifier = Modifier.weight(1f),
+            )
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        Row(modifier = Modifier.fillMaxWidth()) {
+            Button(
+                onClick = {
+                    webView?.computeNavigationExcludingModalities(
+                        origin.trim(),
+                        destination.trim(),
+                        false,
+                        excludeElevator,
+                    )
+                },
+                enabled = origin.isNotBlank() && destination.isNotBlank(),
+            ) {
+                Text("Itinerary")
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            Button(onClick = { webView?.clearNavigation() }) {
+                Text("Clear")
+            }
+        }
+        if (navigationError != null) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(text = navigationError, color = MaterialTheme.colorScheme.error)
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(text = "Avoid elevator", modifier = Modifier.weight(1f))
+            Switch(checked = excludeElevator, onCheckedChange = { excludeElevator = it })
+        }
     }
 }
 

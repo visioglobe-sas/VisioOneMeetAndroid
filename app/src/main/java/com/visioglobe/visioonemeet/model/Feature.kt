@@ -109,6 +109,11 @@ enum class Feature(
         titleRes = R.string.feature_custom_navigation_trace_title,
         descriptionRes = R.string.feature_custom_navigation_trace_description,
     ),
+    NavigationExcludeModalities(
+        slug = "navigation-exclude-modalities",
+        titleRes = R.string.feature_navigation_exclude_modalities_title,
+        descriptionRes = R.string.feature_navigation_exclude_modalities_description,
+    ),
     ;
 
     companion object {

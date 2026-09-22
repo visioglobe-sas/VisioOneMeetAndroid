@@ -53,4 +53,6 @@
     <string name="feature_custom_base_url_description">Pointer le SDK vers un autre serveur de cartes que le SaaS Visioglobe par défaut.</string>
     <string name="feature_custom_navigation_trace_title">Trace de navigation personnalisée</string>
     <string name="feature_custom_navigation_trace_description">Personnaliser les couleurs du trajet calculé avec une palette de marque au choix.</string>
+    <string name="feature_navigation_exclude_modalities_title">Exclure des modalités de navigation</string>
+    <string name="feature_navigation_exclude_modalities_description">Calculer un itinéraire évitant l\'ascenseur via l\'option excludedAttributes de computeNavigation.</string>
 </resources>

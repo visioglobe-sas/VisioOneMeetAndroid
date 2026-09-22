@@ -25,6 +25,7 @@ import com.visioglobe.visioonemeet.ui.FloorSelectorOverlay
 import com.visioglobe.visioonemeet.ui.GeofencingOverlay
 import com.visioglobe.visioonemeet.ui.GoToPoiOverlay
 import com.visioglobe.visioonemeet.ui.NativeUiReplacementOverlay
+import com.visioglobe.visioonemeet.ui.NavigationExcludeModalitiesOverlay
 import com.visioglobe.visioonemeet.ui.OccupancySimulationOverlay
 import com.visioglobe.visioonemeet.ui.PoiClickOverlay
 import com.visioglobe.visioonemeet.ui.ResetViewOverlay
@@ -112,6 +113,8 @@ class MainActivity : ComponentActivity() {
                                     )
                                     Feature.CustomNavigationTrace ->
                                         CustomNavigationTraceOverlay(webView, bridgeState.navigationError)
+                                    Feature.NavigationExcludeModalities ->
+                                        NavigationExcludeModalitiesOverlay(webView, bridgeState.navigationError)
                                     null -> Unit
                                 }
                             },
