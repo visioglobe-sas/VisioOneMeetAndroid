@@ -9,6 +9,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.visioglobe.visioonemeet.model.Feature
+import com.visioglobe.visioonemeet.ui.AccessibleModeOverlay
 import com.visioglobe.visioonemeet.ui.AddLocaleOverlay
 import com.visioglobe.visioonemeet.ui.CameraLockOnPositionOverlay
 import com.visioglobe.visioonemeet.ui.CategoryHighlightOverlay
@@ -115,6 +116,8 @@ class MainActivity : ComponentActivity() {
                                         CustomNavigationTraceOverlay(webView, bridgeState.navigationError)
                                     Feature.NavigationExcludeModalities ->
                                         NavigationExcludeModalitiesOverlay(webView, bridgeState.navigationError)
+                                    Feature.AccessibleMode ->
+                                        AccessibleModeOverlay(webView, bridgeState.navigationError)
                                     null -> Unit
                                 }
                             },

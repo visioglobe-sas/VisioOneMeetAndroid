@@ -65,6 +65,7 @@ Each feature below is a self-contained screen in the app demonstrating one Visio
 - [Custom Map Server](docs/features/custom-base-url.md) — point the SDK at a different map server than the Visioglobe SaaS default via `LoadOptions.baseURL`, reloading the venue from scratch to apply it.
 - [Custom Navigation Trace](docs/features/custom-navigation-trace.md) — restyle the route line drawn by Compute Navigation with a chosen color palette via `venue.updateNavigationTrace()`.
 - [Exclude Navigation Modalities](docs/features/navigation-exclude-modalities.md) — compute a route that avoids the elevator via `venue.computeNavigation()`'s `excludedAttributes` option.
+- [Accessible Mode](docs/features/accessible-mode.md) — compute a route that avoids stairs via `venue.computeNavigation()`'s `isAccessible` option.
 
 ## How it works
 

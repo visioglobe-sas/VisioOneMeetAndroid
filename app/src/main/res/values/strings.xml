@@ -56,4 +56,6 @@
     <string name="feature_custom_navigation_trace_description">Restyle the computed itinerary\'s route line with a chosen brand color palette.</string>
     <string name="feature_navigation_exclude_modalities_title">Exclude navigation modalities</string>
     <string name="feature_navigation_exclude_modalities_description">Compute a route that avoids the elevator via computeNavigation\'s excludedAttributes.</string>
+    <string name="feature_accessible_mode_title">Accessible mode</string>
+    <string name="feature_accessible_mode_description">Compute a route that avoids stairs via computeNavigation\'s isAccessible option.</string>
 </resources>

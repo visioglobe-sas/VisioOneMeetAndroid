@@ -55,4 +55,6 @@
     <string name="feature_custom_navigation_trace_description">Personnaliser les couleurs du trajet calculé avec une palette de marque au choix.</string>
     <string name="feature_navigation_exclude_modalities_title">Exclure des modalités de navigation</string>
     <string name="feature_navigation_exclude_modalities_description">Calculer un itinéraire évitant l\'ascenseur via l\'option excludedAttributes de computeNavigation.</string>
+    <string name="feature_accessible_mode_title">Mode accessible</string>
+    <string name="feature_accessible_mode_description">Calculer un itinéraire évitant les escaliers via l\'option isAccessible de computeNavigation.</string>
 </resources>
