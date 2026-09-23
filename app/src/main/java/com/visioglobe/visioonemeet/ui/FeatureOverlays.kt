@@ -1043,6 +1043,78 @@ fun NavigationExcludeModalitiesOverlay(webView: WebView?, navigationError: Strin
     }
 }
 
+/**
+ * FAB-triggered control for `accessible-mode`: reuses `compute-navigation`'s itinerary
+ * fields/buttons verbatim ([WebView.computeNavigation], same `navigationError` surfacing) rather
+ * than duplicating that logic, then adds a single switch below, "Accessible route" — same reuse
+ * pattern as [NavigationExcludeModalitiesOverlay]'s "Avoid elevator" switch, except this toggles
+ * [computeNavigation]'s existing `isAccessible` argument directly (always passed `false` by every
+ * other call site in this file) rather than needing a new bridge method: `isAccessible` is the
+ * opposite of `navigation-exclude-modalities`'s `['lift']` exclusion — it tells the SDK itself to
+ * exclude the venue's own published accessible-route attributes/modalities from routing, so the
+ * computed route avoids stairs instead of the elevator. Like [excludeElevator] above,
+ * [accessible] is only read when "Itinerary" is pressed, not applied live on toggle. See
+ * docs/features/accessible-mode.md.
+ */
+@Composable
+fun AccessibleModeOverlay(webView: WebView?, navigationError: String?) {
+    var origin by remember { mutableStateOf("") }
+    var destination by remember { mutableStateOf("") }
+    var accessible by remember { mutableStateOf(false) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp),
+    ) {
+        Row(modifier = Modifier.fillMaxWidth()) {
+            OutlinedTextField(
+                value = origin,
+                onValueChange = { origin = it },
+                label = { Text("From (place ID)") },
+                singleLine = true,
+                modifier = Modifier.weight(1f),
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            OutlinedTextField(
+                value = destination,
+                onValueChange = { destination = it },
+                label = { Text("To (place ID)") },
+                singleLine = true,
+                modifier = Modifier.weight(1f),
+            )
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        Row(modifier = Modifier.fillMaxWidth()) {
+            Button(
+                onClick = { webView?.computeNavigation(origin.trim(), destination.trim(), accessible) },
+                enabled = origin.isNotBlank() && destination.isNotBlank(),
+            ) {
+                Text("Itinerary")
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            Button(onClick = { webView?.clearNavigation() }) {
+                Text("Clear")
+            }
+        }
+        if (navigationError != null) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(text = navigationError, color = MaterialTheme.colorScheme.error)
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(text = "Accessible route", modifier = Modifier.weight(1f))
+            Switch(checked = accessible, onCheckedChange = { accessible = it })
+        }
+    }
+}
+
 /** A single POI carried by the `AndroidBridge.onPoiClick` payload. See docs/features/poi-click.md. */
 data class PoiClickInfo(val id: String, val name: String)
 
