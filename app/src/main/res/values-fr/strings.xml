@@ -59,4 +59,6 @@
     <string name="feature_accessible_mode_description">Calculer un itinéraire évitant les escaliers via l\'option isAccessible de computeNavigation.</string>
     <string name="feature_3d_icon_marker_title">Icône 3D positionnée</string>
     <string name="feature_3d_icon_marker_description">Placer une image personnalisée à un endroit de la carte 3D</string>
+    <string name="feature_custom_text_label_title">Label texte personnalisé</string>
+    <string name="feature_custom_text_label_description">Placez votre propre texte sur la carte et modifiez son style en direct</string>
 </resources>

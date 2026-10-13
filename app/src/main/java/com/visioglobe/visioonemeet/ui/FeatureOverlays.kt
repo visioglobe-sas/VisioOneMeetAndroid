@@ -21,6 +21,9 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -28,6 +31,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -38,6 +42,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.core.graphics.toColorInt
 import com.visioglobe.visioonemeet.R
 import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
@@ -2305,6 +2310,298 @@ fun IconMarker3dOverlay(webView: WebView?, iconImagePlaced: IconImagePlacementRe
         } else {
             Text(
                 text = placedOnPoiId?.let { "Icon placed on $it" } ?: "No icon placed",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        }
+    }
+}
+
+/**
+ * Prefilled anchor POI for `custom-text-label` — same "Restaurant" POI (B4 ground floor) as
+ * [ICON_MARKER_DEFAULT_ANCHOR_ID], which has a label to copy a position from. See
+ * docs/features/custom-text-label.md.
+ */
+private const val TEXT_LABEL_DEFAULT_ANCHOR_ID = ICON_MARKER_DEFAULT_ANCHOR_ID
+
+private const val TEXT_LABEL_DEFAULT_TEXT = "Lunch 12:00–14:00"
+
+/** Font colors offered for the label (hex — the SDK only accepts hex / `rgb()` / `hsl()`). */
+private val TEXT_LABEL_COLORS = listOf(
+    "#E53935" to "Red",
+    "#43A047" to "Green",
+    "#1E88E5" to "Blue",
+    "#212121" to "Dark",
+)
+
+/** A label size preset: [width]×[height] in meters, always sent together to the SDK. */
+private data class TextLabelSize(val label: String, val width: Int, val height: Int)
+
+private val TEXT_LABEL_SIZES = listOf(
+    TextLabelSize("Small", width = 10, height = 2),
+    TextLabelSize("Medium", width = 16, height = 3),
+    TextLabelSize("Large", width = 22, height = 4),
+)
+
+/** Rotations offered for the label, in degrees (create-only in the SDK, see the doc). */
+private val TEXT_LABEL_ROTATIONS = listOf(0, 45, 90)
+
+/**
+ * Places the demo text label on [anchorId] by calling `window.MapBridge.placeTextLabel` in the
+ * WebView (`venue.createLabel` under the hood, owned by the anchor POI, at its position offset by
+ * ~4 m). The result arrives asynchronously via `AndroidBridge.onTextLabelPlaced`, echoing
+ * [requestId] back, same convention as [WebView.placeIconImage]. See
+ * docs/features/custom-text-label.md.
+ */
+private fun WebView.placeTextLabel(
+    requestId: Int,
+    anchorId: String,
+    text: String,
+    color: String,
+    size: TextLabelSize,
+    rotation: Int,
+) {
+    val options = JSONObject()
+        .put("text", text)
+        .put("color", color)
+        .put("width", size.width)
+        .put("height", size.height)
+        .put("rotation", rotation)
+    val script = "window.MapBridge.placeTextLabel($requestId, ${JSONObject.quote(anchorId)}, $options)"
+    evaluateJavascript(script, null)
+}
+
+/**
+ * Restyles the placed label live via `window.MapBridge.updateTextLabel` (`venue.updateLabel` under
+ * the hood) with whatever subset of text/color/width+height [options] carries. Fire-and-forget.
+ * See docs/features/custom-text-label.md.
+ */
+private fun WebView.updateTextLabel(options: JSONObject) {
+    evaluateJavascript("window.MapBridge.updateTextLabel($options)", null)
+}
+
+/**
+ * Changes the placed label's rotation via `window.MapBridge.setTextLabelRotation`, which removes
+ * and recreates it (rotation can't go through `venue.updateLabel`). Fire-and-forget. See
+ * docs/features/custom-text-label.md.
+ */
+private fun WebView.setTextLabelRotation(rotation: Int) {
+    evaluateJavascript("window.MapBridge.setTextLabelRotation($rotation)", null)
+}
+
+/**
+ * Removes the placed label via `window.MapBridge.removeTextLabel` (`venue.removeLabel` under the
+ * hood). Fire-and-forget, and a no-op on the JS side if nothing is placed. See
+ * docs/features/custom-text-label.md.
+ */
+private fun WebView.removeTextLabel() {
+    evaluateJavascript("window.MapBridge.removeTextLabel()", null)
+}
+
+/**
+ * Result of a [WebView.placeTextLabel] call, carried by `AndroidBridge.onTextLabelPlaced`.
+ * [status] is one of `"placed"` ([poiId] then non-null), `"text-required"`, `"anchor-not-found"`,
+ * `"anchor-has-no-position"`, or `"error"` ([message] carrying its text).
+ */
+data class TextLabelPlacementResult(
+    val requestId: Int,
+    val status: String,
+    val poiId: String? = null,
+    val message: String? = null,
+)
+
+/** Parses the JSON object argument of `AndroidBridge.onTextLabelPlaced`, e.g. `{"status":"placed","poiId":"…"}`. */
+internal fun parseTextLabelPlacementPayload(requestId: Int, json: String): TextLabelPlacementResult {
+    val root = JSONObject(json)
+    return TextLabelPlacementResult(
+        requestId = requestId,
+        status = root.getString("status"),
+        poiId = if (root.has("poiId")) root.getString("poiId") else null,
+        message = if (root.has("message")) root.getString("message") else null,
+    )
+}
+
+/**
+ * FAB-triggered control for `custom-text-label`: "Anchor POI ID" and "Text" fields, one chip per
+ * [TEXT_LABEL_COLORS] entry, segmented [TEXT_LABEL_SIZES]/[TEXT_LABEL_ROTATIONS] controls, Place
+ * label/Update text/Remove label buttons and a status line. Place calls [WebView.placeTextLabel]
+ * and waits for `AndroidBridge.onTextLabelPlaced` (`requestId` guards against a stale response,
+ * same as [IconMarker3dOverlay]); on success the camera moves to the anchor POI via
+ * [WebView.goToPlace] (goto-poi's own call, its highlight reverted on Remove via
+ * [WebView.clearPlace]). While a label is placed, color/size changes apply live via
+ * [WebView.updateTextLabel] (width and height always together) and a rotation change recreates it
+ * via [WebView.setTextLabelRotation]. See docs/features/custom-text-label.md.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun CustomTextLabelOverlay(webView: WebView?, textLabelPlaced: TextLabelPlacementResult?) {
+    var anchorId by remember { mutableStateOf(TEXT_LABEL_DEFAULT_ANCHOR_ID) }
+    var text by remember { mutableStateOf(TEXT_LABEL_DEFAULT_TEXT) }
+    var color by remember { mutableStateOf(TEXT_LABEL_COLORS.first().first) }
+    var size by remember { mutableStateOf(TEXT_LABEL_SIZES[1]) }
+    var rotation by remember { mutableIntStateOf(TEXT_LABEL_ROTATIONS.first()) }
+    var placedOnPoiId by remember { mutableStateOf<String?>(null) }
+    var pendingRequestId by remember { mutableStateOf<Int?>(null) }
+    var nextRequestId by remember { mutableIntStateOf(0) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+    var statusMessage by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(textLabelPlaced) {
+        val response = textLabelPlaced ?: return@LaunchedEffect
+        if (response.requestId != pendingRequestId) return@LaunchedEffect
+        pendingRequestId = null
+        // placeTextLabel always removes the previous label first, so anything but "placed" means
+        // no label is on the map any more.
+        placedOnPoiId = if (response.status == "placed") response.poiId else null
+        when (response.status) {
+            "placed" -> {
+                errorMessage = null
+                statusMessage = "Label placed on ${response.poiId}"
+                // Reuses goto-poi's call: a label only renders while its POI's floor is displayed.
+                response.poiId?.let { webView?.goToPlace(it) }
+            }
+            "text-required" -> errorMessage = "Text is required"
+            "anchor-not-found" -> errorMessage = "POI not found"
+            "anchor-has-no-position" -> errorMessage = "This POI has no position"
+            else -> errorMessage = response.message ?: "Could not place the label"
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp),
+    ) {
+        OutlinedTextField(
+            value = anchorId,
+            onValueChange = { anchorId = it },
+            label = { Text("Anchor POI ID") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        OutlinedTextField(
+            value = text,
+            onValueChange = { text = it },
+            label = { Text("Text") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+        Text(text = "Color", style = MaterialTheme.typography.labelLarge)
+        FlowRow(modifier = Modifier.fillMaxWidth()) {
+            TEXT_LABEL_COLORS.forEach { (hex, name) ->
+                FilterChip(
+                    selected = hex == color,
+                    onClick = {
+                        color = hex
+                        if (placedOnPoiId != null) webView?.updateTextLabel(JSONObject().put("color", hex))
+                    },
+                    label = { Text(name) },
+                    leadingIcon = {
+                        Box(
+                            modifier = Modifier
+                                .size(14.dp)
+                                .clip(CircleShape)
+                                .background(Color(hex.toColorInt())),
+                        )
+                    },
+                    modifier = Modifier.padding(end = 8.dp),
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(text = "Size", style = MaterialTheme.typography.labelLarge)
+        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+            TEXT_LABEL_SIZES.forEachIndexed { index, option ->
+                SegmentedButton(
+                    selected = option == size,
+                    onClick = {
+                        size = option
+                        if (placedOnPoiId != null) {
+                            webView?.updateTextLabel(
+                                JSONObject().put("width", option.width).put("height", option.height),
+                            )
+                        }
+                    },
+                    shape = SegmentedButtonDefaults.itemShape(index = index, count = TEXT_LABEL_SIZES.size),
+                ) {
+                    Text(option.label)
+                }
+            }
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(text = "Rotation", style = MaterialTheme.typography.labelLarge)
+        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+            TEXT_LABEL_ROTATIONS.forEachIndexed { index, degrees ->
+                SegmentedButton(
+                    selected = degrees == rotation,
+                    onClick = {
+                        rotation = degrees
+                        if (placedOnPoiId != null) webView?.setTextLabelRotation(degrees)
+                    },
+                    shape = SegmentedButtonDefaults.itemShape(index = index, count = TEXT_LABEL_ROTATIONS.size),
+                ) {
+                    Text("$degrees°")
+                }
+            }
+        }
+        Spacer(modifier = Modifier.height(12.dp))
+        FlowRow(modifier = Modifier.fillMaxWidth()) {
+            Button(
+                onClick = {
+                    statusMessage = null
+                    if (text.isBlank()) {
+                        // Mirrors the SDK's own "Cannot create Label, text is required" — the
+                        // previous label is still removed, same as a JS-side failure.
+                        webView?.removeTextLabel()
+                        placedOnPoiId = null
+                        errorMessage = "Text is required"
+                        return@Button
+                    }
+                    errorMessage = null
+                    val requestId = nextRequestId++
+                    pendingRequestId = requestId
+                    webView?.placeTextLabel(requestId, anchorId.trim(), text.trim(), color, size, rotation)
+                },
+                enabled = anchorId.isNotBlank(),
+                modifier = Modifier.padding(end = 8.dp),
+            ) {
+                Text("Place label")
+            }
+            OutlinedButton(
+                onClick = {
+                    if (text.isBlank()) {
+                        errorMessage = "Text is required"
+                        return@OutlinedButton
+                    }
+                    errorMessage = null
+                    statusMessage = "Text updated"
+                    webView?.updateTextLabel(JSONObject().put("text", text.trim()))
+                },
+                enabled = placedOnPoiId != null,
+                modifier = Modifier.padding(end = 8.dp),
+            ) {
+                Text("Update text")
+            }
+            OutlinedButton(
+                onClick = {
+                    webView?.removeTextLabel()
+                    webView?.clearPlace()
+                    placedOnPoiId = null
+                    errorMessage = null
+                    statusMessage = "Label removed"
+                },
+                enabled = placedOnPoiId != null,
+            ) {
+                Text("Remove label")
+            }
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        if (errorMessage != null) {
+            Text(text = errorMessage.orEmpty(), color = MaterialTheme.colorScheme.error)
+        } else {
+            Text(
+                text = statusMessage ?: if (placedOnPoiId != null) "Label placed on $placedOnPoiId" else "No label placed",
                 style = MaterialTheme.typography.bodyMedium,
             )
         }

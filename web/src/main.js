@@ -118,6 +118,17 @@ const ICON_DATA_URL =
 // on. See docs/features/3d-icon-marker.md.
 const iconImages = new Map();
 
+// The Label placed by placeTextLabel (custom-text-label), tracked so
+// updateTextLabel/setTextLabelRotation/removeTextLabel know what to act on.
+// Only one at a time — a demo-side simplification, not an SDK limitation.
+// See docs/features/custom-text-label.md.
+let customTextLabel = null;
+
+// Offset applied to the anchor POI's copied position (~4 m at the demo
+// venue's latitude), so the custom text doesn't sit on top of the map's own
+// label for that POI. See docs/features/custom-text-label.md.
+const CUSTOM_TEXT_LABEL_OFFSET = 0.00004;
+
 // Native -> JS bridge: one method per command, called from Kotlin via
 // WebView.evaluateJavascript(). Kotlin JSON-encodes arguments before
 // interpolating them into the generated script call, so what arrives here
@@ -572,6 +583,88 @@ window.MapBridge = {
     if (!venue || !image) return;
     venue.removeImage(image);
     iconImages.delete(imageId);
+  },
+  // Places a free-text Label owned by the anchor POI, at that POI's own
+  // position (copied via anchorPositionOf, same as createDynamicPoi /
+  // placeIconImage) offset by CUSTOM_TEXT_LABEL_OFFSET. `options` is
+  // { text, color, width, height, rotation } — height is always passed
+  // explicitly, since createLabel otherwise defaults it to width (a square
+  // box). Any label previously placed here is removed first, so only one
+  // exists at a time. The outcome (placed / text required / anchor not found /
+  // anchor has no position / error) is reported back via
+  // AndroidBridge.onTextLabelPlaced, requestId echoed back, same convention as
+  // placeIconImage. See docs/features/custom-text-label.md.
+  placeTextLabel(requestId, anchorId, options) {
+    if (!venue) return;
+    const report = (status, extra) => {
+      bridge?.onTextLabelPlaced(requestId, JSON.stringify({ status, ...extra }));
+    };
+    window.MapBridge.removeTextLabel();
+    const text = String(options.text ?? '').trim();
+    if (!text) {
+      report('text-required');
+      return;
+    }
+    const anchor = venue.pois.find((p) => p.id === anchorId);
+    if (!anchor) {
+      report('anchor-not-found');
+      return;
+    }
+    // Read after removing our previous label, so a re-place never copies
+    // (and re-offsets) our own label's position.
+    const anchorPosition = anchorPositionOf(anchor);
+    if (!anchorPosition) {
+      report('anchor-has-no-position');
+      return;
+    }
+    const position = {
+      ...anchorPosition,
+      latitude: anchorPosition.latitude + CUSTOM_TEXT_LABEL_OFFSET,
+      longitude: anchorPosition.longitude + CUSTOM_TEXT_LABEL_OFFSET,
+    };
+    try {
+      customTextLabel = venue.createLabel({
+        poi: anchor,
+        position,
+        width: options.width,
+        height: options.height,
+        text,
+        color: options.color,
+        rotation: options.rotation,
+      });
+      report('placed', { poiId: anchor.id });
+    } catch (error) {
+      report('error', { message: String(error?.message ?? error) });
+    }
+  },
+  // Restyles the placed label live via venue.updateLabel. `options` may carry
+  // text, color, and width+height — callers always send width and height
+  // together, since updateLabel with width alone also sets height = width.
+  // An empty text is ignored (createLabel would throw on it; native validates
+  // first). A no-op if nothing is placed. See docs/features/custom-text-label.md.
+  updateTextLabel(options) {
+    if (!venue || !customTextLabel) return;
+    if (options.text !== undefined && !String(options.text).trim()) return;
+    venue.updateLabel(customTextLabel, options);
+  },
+  // `rotation` is a create-only option (absent from LabelUpdateOptions), so a
+  // rotation change removes the placed label and recreates it with the same
+  // poi/position/size/text/color read back off the Label itself, plus the
+  // new rotation. A no-op if nothing is placed. See
+  // docs/features/custom-text-label.md.
+  setTextLabelRotation(rotation) {
+    if (!venue || !customTextLabel) return;
+    const { poi, position, width, height, text, color } = customTextLabel;
+    window.MapBridge.removeTextLabel();
+    customTextLabel = venue.createLabel({ poi, position, width, height, text, color, rotation });
+  },
+  // Removes the placed label via venue.removeLabel and forgets it — the SDK
+  // throws "Provided label is not registered" on a second removal, so this
+  // is a no-op if nothing is placed. See docs/features/custom-text-label.md.
+  removeTextLabel() {
+    if (!venue || !customTextLabel) return;
+    venue.removeLabel(customTextLabel);
+    customTextLabel = null;
   },
   // Reports the venue's currentLocale back to native in one round trip, so
   // the runtime-locale sheet can highlight whichever option is already

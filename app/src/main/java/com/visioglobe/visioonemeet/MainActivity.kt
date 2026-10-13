@@ -18,6 +18,7 @@ import com.visioglobe.visioonemeet.ui.ComputeNavigationOverlay
 import com.visioglobe.visioonemeet.ui.CustomBaseUrlOverlay
 import com.visioglobe.visioonemeet.ui.CustomDataOverlay
 import com.visioglobe.visioonemeet.ui.CustomNavigationTraceOverlay
+import com.visioglobe.visioonemeet.ui.CustomTextLabelOverlay
 import com.visioglobe.visioonemeet.ui.DynamicPoiCrudOverlay
 import com.visioglobe.visioonemeet.ui.ExploreModeOverlay
 import com.visioglobe.visioonemeet.ui.FeatureMapScreen
@@ -121,6 +122,8 @@ class MainActivity : ComponentActivity() {
                                         AccessibleModeOverlay(webView, bridgeState.navigationError)
                                     Feature.IconMarker3d ->
                                         IconMarker3dOverlay(webView, bridgeState.iconImagePlaced)
+                                    Feature.CustomTextLabel ->
+                                        CustomTextLabelOverlay(webView, bridgeState.textLabelPlaced)
                                     null -> Unit
                                 }
                             },
