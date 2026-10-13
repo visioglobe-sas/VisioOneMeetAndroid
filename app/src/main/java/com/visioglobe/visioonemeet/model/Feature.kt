@@ -124,6 +124,11 @@ enum class Feature(
         titleRes = R.string.feature_3d_icon_marker_title,
         descriptionRes = R.string.feature_3d_icon_marker_description,
     ),
+    CustomTextLabel(
+        slug = "custom-text-label",
+        titleRes = R.string.feature_custom_text_label_title,
+        descriptionRes = R.string.feature_custom_text_label_description,
+    ),
     ;
 
     companion object {

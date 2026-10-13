@@ -67,6 +67,7 @@ Each feature below is a self-contained screen in the app demonstrating one Visio
 - [Exclude Navigation Modalities](docs/features/navigation-exclude-modalities.md) — compute a route that avoids the elevator via `venue.computeNavigation()`'s `excludedAttributes` option.
 - [Accessible Mode](docs/features/accessible-mode.md) — compute a route that avoids stairs via `venue.computeNavigation()`'s `isAccessible` option.
 - [3D Icon Marker](docs/features/3d-icon-marker.md) — place a custom image at a spot on the 3D map via `venue.createImage()`, switching its orientation live via `venue.updateImage()` and removing it via `venue.removeImage()`.
+- [Custom Text Label](docs/features/custom-text-label.md) — place your own free text on the map via `venue.createLabel()`, restyling it live via `venue.updateLabel()` and removing it via `venue.removeLabel()`.
 
 ## How it works
 
