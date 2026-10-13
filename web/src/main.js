@@ -98,6 +98,26 @@ function isPositionInsidePolygon(position, polygonPositions) {
   return inside;
 }
 
+// POIs carry no direct lat/lng field: a position has to be read off one of
+// the POI's attached visual elements instead. Shared by createDynamicPoi
+// (dynamic-poi-crud) and placeIconImage (3d-icon-marker), which both copy
+// an existing "anchor" POI's position. Returns undefined when the POI has
+// none of the three. See docs/features/dynamic-poi-crud.md.
+function anchorPositionOf(poi) {
+  return poi.labels[0]?.position ?? poi.markers[0]?.position ?? poi.images[0]?.position;
+}
+
+// The image shown by 3d-icon-marker: a 96x96 PNG (blue disc + white star)
+// inlined as a data URL, so the demo needs no hosted asset. See
+// docs/features/3d-icon-marker.md.
+const ICON_DATA_URL =
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAYAAADimHc4AAACBklEQVR42u3dWW4CMRBFUVbLarOn5JsIqRlsv6FuSfmE0O+IwS7bfbtR1GXdf34/+qMOhg2KcehgGIU+HsMt+DEQ7sHXQqQFXwWRHn4sQkvwkRCt4dsjtAdvDTEtfCuEqeFbIAgv/H/NQzAKfx6CYfhzEIzD70cQf+FFAGxFAEAIEBJ+J4LB7+04gKUIAAgBTEackQBfI4SG34MAgBDAaMIrHuAjBACEAGZTvhUAbyEAIAQwbHrUALyEAAAAcwGMe68V4V8iHAjJHeAI7mqAb0oNcOK1vwYgCP+di1E/334EMcDVRSmewx5gd60COPk6K94Bzy7u1OP4CAqrNQCCQdJ4gAcE0Uh1dPgrASYirB0Ri+dsRoa/A6AdYt+ckNksZn3wpwDSIc7NiprP69cFrwJwBdH3BUo6YLlN+qI2ZGZ7EgAA+AgqD99/ueKA8K0Q0veAxSMk7v+tQnABULQrvQZhQgBVv9gCQb00cXVoUQgOa0MBEALsCitvFlSEMBpAvT9gd0g5TRgATAGMe8Ru/ydul+TJULIBNiGMBlDvlFcE4rkGSISgCsICwOG0FGUIuQDCdaM121ydTs1S/wrJDP8gQN3pu44nJzo1RXLC56h6Ts4FAAROUCd8ELiLBuGDwJ2UCB8E7qhH8BMR4orgQZgdfjJEbRE8ELODd8KgBBjUQRSKuqo/fm7G7BpJ/VcAAAAASUVORK5CYII=';
+
+// Images created at runtime by placeIconImage, keyed by the id the native
+// side chose, so updateIconImageOrientation/removeIconImage know what to act
+// on. See docs/features/3d-icon-marker.md.
+const iconImages = new Map();
+
 // Native -> JS bridge: one method per command, called from Kotlin via
 // WebView.evaluateJavascript(). Kotlin JSON-encodes arguments before
 // interpolating them into the generated script call, so what arrives here
@@ -454,7 +474,7 @@ window.MapBridge = {
       report('anchor-not-found');
       return;
     }
-    const anchorPosition = anchor.labels[0]?.position ?? anchor.markers[0]?.position ?? anchor.images[0]?.position;
+    const anchorPosition = anchorPositionOf(anchor);
     if (!anchorPosition) {
       report('anchor-has-no-position');
       return;
@@ -495,6 +515,63 @@ window.MapBridge = {
     venue.removePOI(dynamicPoi);
     dynamicPoi = null;
     dynamicLabel = null;
+  },
+  // Places an Image owned by the anchor POI itself, at that POI's own
+  // position (copied via anchorPositionOf, same as createDynamicPoi), 6x6
+  // meters, oriented per orientationType ('fixed' | 'flat' | 'facing'). Any
+  // image previously placed under the same imageId is removed first, so only
+  // one exists per id. The outcome (placed / anchor not found / anchor has no
+  // position / error) is reported back via AndroidBridge.onIconImagePlaced,
+  // requestId echoed back, same convention as createDynamicPoi. See
+  // docs/features/3d-icon-marker.md.
+  placeIconImage(requestId, imageId, anchorId, orientationType) {
+    if (!venue) return;
+    const report = (status, extra) => {
+      bridge?.onIconImagePlaced(requestId, JSON.stringify({ status, ...extra }));
+    };
+    const anchor = venue.pois.find((p) => p.id === anchorId);
+    if (!anchor) {
+      report('anchor-not-found');
+      return;
+    }
+    // Read before removing the previous image: once placed, our own image
+    // becomes one of anchor.images too.
+    const position = anchorPositionOf(anchor);
+    if (!position) {
+      report('anchor-has-no-position');
+      return;
+    }
+    window.MapBridge.removeIconImage(imageId);
+    try {
+      const image = venue.createImage({
+        poi: anchor,
+        position,
+        width: 6,
+        height: 6,
+        url: ICON_DATA_URL,
+        orientationType,
+      });
+      iconImages.set(imageId, image);
+      report('placed', { poiId: anchor.id });
+    } catch (error) {
+      report('error', { message: String(error?.message ?? error) });
+    }
+  },
+  // Switches a placed image's orientation live via venue.updateImage. A
+  // no-op if nothing is placed under imageId. See
+  // docs/features/3d-icon-marker.md.
+  updateIconImageOrientation(imageId, orientationType) {
+    const image = iconImages.get(imageId);
+    if (!venue || !image) return;
+    venue.updateImage(image, { orientationType });
+  },
+  // Removes a placed image via venue.removeImage. A no-op if nothing is
+  // placed under imageId. See docs/features/3d-icon-marker.md.
+  removeIconImage(imageId) {
+    const image = iconImages.get(imageId);
+    if (!venue || !image) return;
+    venue.removeImage(image);
+    iconImages.delete(imageId);
   },
   // Reports the venue's currentLocale back to native in one round trip, so
   // the runtime-locale sheet can highlight whichever option is already

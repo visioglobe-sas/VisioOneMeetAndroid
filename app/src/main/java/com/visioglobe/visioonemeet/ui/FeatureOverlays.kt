@@ -2133,3 +2133,180 @@ fun CustomBaseUrlOverlay(currentBaseUrl: String, onReload: (String) -> Unit) {
         }
     }
 }
+
+/**
+ * Prefilled anchor POI for `3d-icon-marker`: a POI of the shared demo map that has a label to copy
+ * a position from ("Restaurant", B4 ground floor). See docs/features/3d-icon-marker.md.
+ */
+private const val ICON_MARKER_DEFAULT_ANCHOR_ID = "B4-UL00-ID0009"
+
+/**
+ * The single image id this demo places under on the JS side — only one icon at a time, a
+ * demo-side simplification, not an SDK limitation.
+ */
+private const val ICON_MARKER_IMAGE_ID = "demo-icon"
+
+/** The SDK's three `OrientationType` values, paired with a human-readable label. */
+private val ICON_MARKER_ORIENTATIONS = listOf(
+    "fixed" to "Fixed",
+    "flat" to "Flat",
+    "facing" to "Facing camera",
+)
+
+/**
+ * Places the demo icon on [anchorId] by calling `window.MapBridge.placeIconImage` in the WebView
+ * (`venue.createImage` under the hood, owned by the anchor POI itself, at its own position). The
+ * result arrives asynchronously via `AndroidBridge.onIconImagePlaced`, echoing [requestId] back,
+ * same convention as [WebView.createDynamicPoi]. See docs/features/3d-icon-marker.md.
+ */
+private fun WebView.placeIconImage(requestId: Int, anchorId: String, orientationType: String) {
+    val script = "window.MapBridge.placeIconImage(" +
+        "$requestId, ${JSONObject.quote(ICON_MARKER_IMAGE_ID)}, ${JSONObject.quote(anchorId)}, " +
+        "${JSONObject.quote(orientationType)})"
+    evaluateJavascript(script, null)
+}
+
+/**
+ * Switches the placed icon's orientation live via `window.MapBridge.updateIconImageOrientation`
+ * (`venue.updateImage` under the hood). Fire-and-forget. See docs/features/3d-icon-marker.md.
+ */
+private fun WebView.updateIconImageOrientation(orientationType: String) {
+    val script = "window.MapBridge.updateIconImageOrientation(" +
+        "${JSONObject.quote(ICON_MARKER_IMAGE_ID)}, ${JSONObject.quote(orientationType)})"
+    evaluateJavascript(script, null)
+}
+
+/**
+ * Removes the placed icon via `window.MapBridge.removeIconImage` (`venue.removeImage` under the
+ * hood). Fire-and-forget. See docs/features/3d-icon-marker.md.
+ */
+private fun WebView.removeIconImage() {
+    evaluateJavascript("window.MapBridge.removeIconImage(${JSONObject.quote(ICON_MARKER_IMAGE_ID)})", null)
+}
+
+/**
+ * Result of a [WebView.placeIconImage] call, carried by `AndroidBridge.onIconImagePlaced`.
+ * [status] is one of `"placed"` ([poiId] then non-null), `"anchor-not-found"`,
+ * `"anchor-has-no-position"`, or `"error"` ([message] carrying its text).
+ */
+data class IconImagePlacementResult(
+    val requestId: Int,
+    val status: String,
+    val poiId: String? = null,
+    val message: String? = null,
+)
+
+/** Parses the JSON object argument of `AndroidBridge.onIconImagePlaced`, e.g. `{"status":"placed","poiId":"…"}`. */
+internal fun parseIconImagePlacementPayload(requestId: Int, json: String): IconImagePlacementResult {
+    val root = JSONObject(json)
+    return IconImagePlacementResult(
+        requestId = requestId,
+        status = root.getString("status"),
+        poiId = if (root.has("poiId")) root.getString("poiId") else null,
+        message = if (root.has("message")) root.getString("message") else null,
+    )
+}
+
+/**
+ * FAB-triggered control for `3d-icon-marker`: an "Anchor POI ID" field (prefilled with
+ * [ICON_MARKER_DEFAULT_ANCHOR_ID]), one chip per [ICON_MARKER_ORIENTATIONS] entry (default
+ * "Facing camera"), Place icon/Remove icon buttons and a status line. Place calls
+ * [WebView.placeIconImage] and waits for `AndroidBridge.onIconImagePlaced` (`requestId` guards
+ * against a stale response, same as [DynamicPoiCrudOverlay]); "POI not found"/"no position"
+ * outcomes surface as normal states; on success the camera moves to the anchor POI via
+ * [WebView.goToPlace] (goto-poi's own call — its surface highlight is reverted on Remove via
+ * [WebView.clearPlace]). Changing the orientation while an icon is placed calls
+ * [WebView.updateIconImageOrientation] live. See docs/features/3d-icon-marker.md.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun IconMarker3dOverlay(webView: WebView?, iconImagePlaced: IconImagePlacementResult?) {
+    var anchorId by remember { mutableStateOf(ICON_MARKER_DEFAULT_ANCHOR_ID) }
+    var orientation by remember { mutableStateOf("facing") }
+    var placedOnPoiId by remember { mutableStateOf<String?>(null) }
+    var pendingRequestId by remember { mutableStateOf<Int?>(null) }
+    var nextRequestId by remember { mutableStateOf(0) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(iconImagePlaced) {
+        val response = iconImagePlaced ?: return@LaunchedEffect
+        if (response.requestId != pendingRequestId) return@LaunchedEffect
+        pendingRequestId = null
+        when (response.status) {
+            "placed" -> {
+                errorMessage = null
+                placedOnPoiId = response.poiId
+                // Reuses goto-poi's call: from the default whole-venue view the indoor floor (and
+                // so the icon) isn't shown, so the camera has to move to the anchor POI.
+                response.poiId?.let { webView?.goToPlace(it) }
+            }
+            "anchor-not-found" -> errorMessage = "POI not found"
+            "anchor-has-no-position" -> errorMessage = "This POI has no position"
+            else -> errorMessage = response.message ?: "Could not place the icon"
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp),
+    ) {
+        OutlinedTextField(
+            value = anchorId,
+            onValueChange = { anchorId = it },
+            label = { Text("Anchor POI ID") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+        Text(text = "Orientation", style = MaterialTheme.typography.labelLarge)
+        FlowRow(modifier = Modifier.fillMaxWidth()) {
+            ICON_MARKER_ORIENTATIONS.forEach { (value, label) ->
+                FilterChip(
+                    selected = value == orientation,
+                    onClick = {
+                        orientation = value
+                        if (placedOnPoiId != null) webView?.updateIconImageOrientation(value)
+                    },
+                    label = { Text(label) },
+                    modifier = Modifier.padding(end = 8.dp),
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        Row(modifier = Modifier.fillMaxWidth()) {
+            Button(
+                onClick = {
+                    errorMessage = null
+                    val requestId = nextRequestId++
+                    pendingRequestId = requestId
+                    webView?.placeIconImage(requestId, anchorId.trim(), orientation)
+                },
+                enabled = anchorId.isNotBlank(),
+            ) {
+                Text("Place icon")
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            OutlinedButton(
+                onClick = {
+                    webView?.removeIconImage()
+                    webView?.clearPlace()
+                    placedOnPoiId = null
+                    errorMessage = null
+                },
+                enabled = placedOnPoiId != null,
+            ) {
+                Text("Remove icon")
+            }
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        if (errorMessage != null) {
+            Text(text = errorMessage.orEmpty(), color = MaterialTheme.colorScheme.error)
+        } else {
+            Text(
+                text = placedOnPoiId?.let { "Icon placed on $it" } ?: "No icon placed",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        }
+    }
+}

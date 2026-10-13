@@ -11,6 +11,11 @@ A bare `venue.createPOI()` has no visual representation of its own, so this demo
 ```js
 // web/src/main.js
 
+// POIs carry no direct lat/lng field: read it off an attached visual element.
+function anchorPositionOf(poi) {
+  return poi.labels[0]?.position ?? poi.markers[0]?.position ?? poi.images[0]?.position;
+}
+
 // The POI/Label pair created at runtime, tracked so updateDynamicPoiLabel/
 // removeDynamicPoi know what to act on. Only one dynamic POI at a time.
 let dynamicPoi = null;
@@ -26,7 +31,7 @@ createDynamicPoi(requestId, newId, anchorId, labelText) {
     report('anchor-not-found');
     return;
   }
-  const anchorPosition = anchor.labels[0]?.position ?? anchor.markers[0]?.position ?? anchor.images[0]?.position;
+  const anchorPosition = anchorPositionOf(anchor);
   if (!anchorPosition) {
     report('anchor-has-no-position');
     return;

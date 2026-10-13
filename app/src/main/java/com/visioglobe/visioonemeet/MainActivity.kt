@@ -25,6 +25,7 @@ import com.visioglobe.visioonemeet.ui.FeatureMenuScreen
 import com.visioglobe.visioonemeet.ui.FloorSelectorOverlay
 import com.visioglobe.visioonemeet.ui.GeofencingOverlay
 import com.visioglobe.visioonemeet.ui.GoToPoiOverlay
+import com.visioglobe.visioonemeet.ui.IconMarker3dOverlay
 import com.visioglobe.visioonemeet.ui.NativeUiReplacementOverlay
 import com.visioglobe.visioonemeet.ui.NavigationExcludeModalitiesOverlay
 import com.visioglobe.visioonemeet.ui.OccupancySimulationOverlay
@@ -118,6 +119,8 @@ class MainActivity : ComponentActivity() {
                                         NavigationExcludeModalitiesOverlay(webView, bridgeState.navigationError)
                                     Feature.AccessibleMode ->
                                         AccessibleModeOverlay(webView, bridgeState.navigationError)
+                                    Feature.IconMarker3d ->
+                                        IconMarker3dOverlay(webView, bridgeState.iconImagePlaced)
                                     null -> Unit
                                 }
                             },
