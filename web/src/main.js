@@ -102,9 +102,15 @@ function isPositionInsidePolygon(position, polygonPositions) {
 // the POI's attached visual elements instead. Shared by createDynamicPoi
 // (dynamic-poi-crud) and placeIconImage (3d-icon-marker), which both copy
 // an existing "anchor" POI's position. Returns undefined when the POI has
-// none of the three. See docs/features/dynamic-poi-crud.md.
-function anchorPositionOf(poi) {
-  return poi.labels[0]?.position ?? poi.markers[0]?.position ?? poi.images[0]?.position;
+// none of the three. `excludedLabel` (optional) is skipped, so a caller whose
+// own label is still attached to the anchor (custom-text-label) never copies
+// it instead of the map's own data. See docs/features/dynamic-poi-crud.md.
+function anchorPositionOf(poi, excludedLabel = null) {
+  return (
+    poi.labels.find((label) => label !== excludedLabel)?.position ??
+    poi.markers[0]?.position ??
+    poi.images[0]?.position
+  );
 }
 
 // The image shown by 3d-icon-marker: a 96x96 PNG (blue disc + white star)
@@ -589,9 +595,11 @@ window.MapBridge = {
   // placeIconImage) offset by CUSTOM_TEXT_LABEL_OFFSET. `options` is
   // { text, color, width, height, rotation } — height is always passed
   // explicitly, since createLabel otherwise defaults it to width (a square
-  // box). Any label previously placed here is removed first, so only one
-  // exists at a time. The outcome (placed / text required / anchor not found /
-  // anchor has no position / error) is reported back via
+  // box). Text, anchor and anchor position are all validated BEFORE touching
+  // the label already placed: a failed place leaves it on the map untouched.
+  // Only once all three pass is the previous label removed (only one exists at
+  // a time) and the new one created. The outcome (placed / text required /
+  // anchor not found / anchor has no position / error) is reported back via
   // AndroidBridge.onTextLabelPlaced, requestId echoed back, same convention as
   // placeIconImage. See docs/features/custom-text-label.md.
   placeTextLabel(requestId, anchorId, options) {
@@ -599,7 +607,6 @@ window.MapBridge = {
     const report = (status, extra) => {
       bridge?.onTextLabelPlaced(requestId, JSON.stringify({ status, ...extra }));
     };
-    window.MapBridge.removeTextLabel();
     const text = String(options.text ?? '').trim();
     if (!text) {
       report('text-required');
@@ -610,13 +617,14 @@ window.MapBridge = {
       report('anchor-not-found');
       return;
     }
-    // Read after removing our previous label, so a re-place never copies
-    // (and re-offsets) our own label's position.
-    const anchorPosition = anchorPositionOf(anchor);
+    // Our previous label may still be attached to this anchor: skip it, so a
+    // re-place never copies (and re-offsets) our own label's position.
+    const anchorPosition = anchorPositionOf(anchor, customTextLabel);
     if (!anchorPosition) {
       report('anchor-has-no-position');
       return;
     }
+    window.MapBridge.removeTextLabel();
     const position = {
       ...anchorPosition,
       latitude: anchorPosition.latitude + CUSTOM_TEXT_LABEL_OFFSET,

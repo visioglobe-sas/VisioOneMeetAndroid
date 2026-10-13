@@ -11,9 +11,14 @@ The label is owned by an existing "anchor" POI and placed next to that POI's own
 ```js
 // web/src/main.js
 
-// POIs carry no direct lat/lng field: read it off an attached visual element.
-function anchorPositionOf(poi) {
-  return poi.labels[0]?.position ?? poi.markers[0]?.position ?? poi.images[0]?.position;
+// POIs carry no direct lat/lng field: read it off an attached visual element,
+// skipping `excludedLabel` (our own label, possibly still attached to the anchor).
+function anchorPositionOf(poi, excludedLabel = null) {
+  return (
+    poi.labels.find((label) => label !== excludedLabel)?.position ??
+    poi.markers[0]?.position ??
+    poi.images[0]?.position
+  );
 }
 
 let customTextLabel = null;
@@ -25,7 +30,7 @@ placeTextLabel(requestId, anchorId, options) {
   const report = (status, extra) => {
     bridge?.onTextLabelPlaced(requestId, JSON.stringify({ status, ...extra }));
   };
-  window.MapBridge.removeTextLabel(); // only one label at a time
+  // Validate everything first: a failed place leaves the current label untouched.
   const text = String(options.text ?? '').trim();
   if (!text) {
     report('text-required');
@@ -36,11 +41,12 @@ placeTextLabel(requestId, anchorId, options) {
     report('anchor-not-found');
     return;
   }
-  const anchorPosition = anchorPositionOf(anchor);
+  const anchorPosition = anchorPositionOf(anchor, customTextLabel);
   if (!anchorPosition) {
     report('anchor-has-no-position');
     return;
   }
+  window.MapBridge.removeTextLabel(); // only one label at a time
   const position = {
     ...anchorPosition,
     latitude: anchorPosition.latitude + CUSTOM_TEXT_LABEL_OFFSET,
@@ -142,7 +148,7 @@ The SDK calls exercised:
 - **Color format.** `color` must be hex, `rgb()` or `hsl()` (alpha is ignored); anything else throws `Invalid color format provided…`.
 - **Empty text throws.** `createLabel` with an empty `text` throws `Cannot create Label, text is required` — validate before calling.
 - **Removing twice throws.** `removeLabel` (or `updateLabel`) on a label that was already removed throws `Provided label is not registered`. Forget your reference right after removing it.
-- **The anchor POI keeps its own label.** `createLabel` appends your label to `poi.labels`, next to the label published with the map — it doesn't replace or alter it. `removeLabel` only removes yours. Read the anchor's position *before* placing your label (or after removing it), so you never copy your own offset label's position.
+- **The anchor POI keeps its own label.** `createLabel` appends your label to `poi.labels`, next to the label published with the map — it doesn't replace or alter it. `removeLabel` only removes yours. When copying the anchor's position, skip your own label (it sits in `poi.labels` too), so you never copy — and re-offset — your own label's position.
 - **One `Label` per `createLabel` call.** Calling it again adds another label; keep the returned `Label` and remove it first if you want only one.
 - **The anchor's floor must be visible.** A label is attached to its owner POI's floor and only renders while that floor is displayed — not in the default whole-venue view. Move the camera there (e.g. `view.goToPOI(anchor)`) after placing it.
 - **Offsetting a position.** A position is plain WGS84; `0.00004°` of latitude/longitude is roughly 4 m, enough to clear the POI's own label at building scale.

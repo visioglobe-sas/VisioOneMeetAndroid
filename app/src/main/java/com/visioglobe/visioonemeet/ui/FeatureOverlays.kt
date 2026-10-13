@@ -2449,11 +2449,11 @@ fun CustomTextLabelOverlay(webView: WebView?, textLabelPlaced: TextLabelPlacemen
         val response = textLabelPlaced ?: return@LaunchedEffect
         if (response.requestId != pendingRequestId) return@LaunchedEffect
         pendingRequestId = null
-        // placeTextLabel always removes the previous label first, so anything but "placed" means
-        // no label is on the map any more.
-        placedOnPoiId = if (response.status == "placed") response.poiId else null
+        // placeTextLabel validates everything before touching the previous label, so a failed
+        // place leaves it on the map: only a "placed" result changes placedOnPoiId.
         when (response.status) {
             "placed" -> {
+                placedOnPoiId = response.poiId
                 errorMessage = null
                 statusMessage = "Label placed on ${response.poiId}"
                 // Reuses goto-poi's call: a label only renders while its POI's floor is displayed.
@@ -2551,10 +2551,8 @@ fun CustomTextLabelOverlay(webView: WebView?, textLabelPlaced: TextLabelPlacemen
                 onClick = {
                     statusMessage = null
                     if (text.isBlank()) {
-                        // Mirrors the SDK's own "Cannot create Label, text is required" — the
-                        // previous label is still removed, same as a JS-side failure.
-                        webView?.removeTextLabel()
-                        placedOnPoiId = null
+                        // Mirrors the SDK's own "Cannot create Label, text is required"; any label
+                        // already placed stays on the map, same as a JS-side validation failure.
                         errorMessage = "Text is required"
                         return@Button
                     }
