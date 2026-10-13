@@ -301,9 +301,9 @@ sequenceDiagram
   participant MS as mapserver.visioglobe.com
 
   U->>CA: Ouvre l'application
-  CA->>WV: charge index.html?hash=...
+  CA->>WV: charge index.html?vg_maphash=...
   WV->>JS: exécute le bundle
-  JS->>SDK: createVisioOne() puis loadVenue({hash})
+  JS->>SDK: createVisioOne() puis loadVenue({vg_maphash})
   SDK->>MS: télécharge les données de la carte
   MS-->>SDK: assets (POI, étages, 3D)
   SDK-->>JS: carte prête, createView(container)

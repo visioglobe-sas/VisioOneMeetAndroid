@@ -74,7 +74,7 @@ Le "contrat" est l'ensemble des messages que les deux côtés se sont mis d'acco
 
 | Direction | Message | Payload | Émis par | Reçu par |
 |---|---|---|---|---|
-| Natif → Web | `?hash=<mapHash>` (query param) | Chaîne de 41 caractères | `VisioOneMapScreen.kt` (`loadUrl`) | `web/src/main.js` (`URLSearchParams`) |
+| Natif → Web | `?vg_maphash=<mapHash>` (query param) | Chaîne de 41 caractères | `VisioOneMapScreen.kt` (`loadUrl`) | `web/src/main.js` (`URLSearchParams`) |
 | Web → Natif | `AndroidBridge.onMapReady()` | Aucun | `web/src/main.js`, après `createView()` réussi | `MapBridge.onMapReady()` dans `VisioOneMapScreen.kt` |
 | Web → Natif | `AndroidBridge.onMapError(message)` | `String` (message d'erreur) | `web/src/main.js`, dans le `catch` de `main()` | `MapBridge.onMapError()` dans `VisioOneMapScreen.kt` |
 | Web → Natif | `AndroidBridge.onPoiClick(payload)` | `String` (JSON : tableau de `{id, name}`) | `web/src/main.js`, listener `view.addEventListener('poiclick', ...)` | `MapBridge.onPoiClick()` dans `FeatureMapScreen.kt` — voir `docs/features/poi-click.md` |
@@ -99,10 +99,10 @@ sequenceDiagram
   participant SDK as SDK VisioOne
 
   Compose->>WV: addJavascriptInterface(MapBridge(...), "AndroidBridge")
-  Compose->>WV: loadUrl("...index.html?hash=...")
+  Compose->>WV: loadUrl("...index.html?vg_maphash=...")
   WV->>JSEngine: charge et exécute main.js
   JSEngine->>JS: lit window.location.search → hash
-  JS->>SDK: createVisioOne() / loadVenue({hash}) / createView(...)
+  JS->>SDK: createVisioOne() / loadVenue({vg_maphash}) / createView(...)
   SDK-->>JS: Promise résolue (carte prête)
   JS->>JSEngine: appelle window.AndroidBridge.onMapReady()
   JSEngine->>Bridge: invoque MapBridge.onMapReady()<br/>⚠ sur un thread d'arrière-plan
@@ -158,7 +158,7 @@ const bridge = window.AndroidBridge;
 async function main() {
   try {
     const visioOne = createVisioOne();
-    const venue = await visioOne.loadVenue({ hash });
+    const venue = await visioOne.loadVenue({ vg_maphash: hash });
     await visioOne.createView(container, venue);
     bridge?.onMapReady();
   } catch (error) {
