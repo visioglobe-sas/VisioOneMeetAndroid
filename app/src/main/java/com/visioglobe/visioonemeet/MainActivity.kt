@@ -26,6 +26,7 @@ import com.visioglobe.visioonemeet.ui.FeatureMenuScreen
 import com.visioglobe.visioonemeet.ui.FloorSelectorOverlay
 import com.visioglobe.visioonemeet.ui.GeofencingOverlay
 import com.visioglobe.visioonemeet.ui.GoToPoiOverlay
+import com.visioglobe.visioonemeet.ui.HtmlOverlayMarkerOverlay
 import com.visioglobe.visioonemeet.ui.IconMarker3dOverlay
 import com.visioglobe.visioonemeet.ui.NativeUiReplacementOverlay
 import com.visioglobe.visioonemeet.ui.NavigationExcludeModalitiesOverlay
@@ -124,6 +125,8 @@ class MainActivity : ComponentActivity() {
                                         IconMarker3dOverlay(webView, bridgeState.iconImagePlaced)
                                     Feature.CustomTextLabel ->
                                         CustomTextLabelOverlay(webView, bridgeState.textLabelPlaced)
+                                    Feature.HtmlOverlayMarker ->
+                                        HtmlOverlayMarkerOverlay(webView, bridgeState.htmlMarkerState)
                                     null -> Unit
                                 }
                             },

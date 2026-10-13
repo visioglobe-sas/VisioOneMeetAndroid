@@ -129,6 +129,11 @@ enum class Feature(
         titleRes = R.string.feature_custom_text_label_title,
         descriptionRes = R.string.feature_custom_text_label_description,
     ),
+    HtmlOverlayMarker(
+        slug = "html-overlay-marker",
+        titleRes = R.string.feature_html_overlay_marker_title,
+        descriptionRes = R.string.feature_html_overlay_marker_description,
+    ),
     ;
 
     companion object {

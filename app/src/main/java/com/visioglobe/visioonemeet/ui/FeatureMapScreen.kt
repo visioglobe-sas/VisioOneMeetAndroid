@@ -81,6 +81,7 @@ data class FeatureBridgeState(
     val currentBaseUrl: String = DEFAULT_SDK_BASE_URL,
     val iconImagePlaced: IconImagePlacementResult? = null,
     val textLabelPlaced: TextLabelPlacementResult? = null,
+    val htmlMarkerState: HtmlMarkerState? = null,
     val onReloadWithBaseUrl: (String) -> Unit = {},
 )
 
@@ -149,6 +150,13 @@ data class FeatureBridgeState(
  * reports its result back via `AndroidBridge.onTextLabelPlaced`, surfaced via
  * [FeatureBridgeState.textLabelPlaced]. See docs/features/custom-text-label.md.
  *
+ * Every `html-overlay-marker` command (place/update text/show-hide/remove) and every tap on the
+ * badge itself reports the badge's whole state back via `AndroidBridge.onHtmlMarkerStateChanged`,
+ * surfaced via [FeatureBridgeState.htmlMarkerState]. It's kept here, outside the bottom sheet,
+ * because the visitor has to close the sheet to tap the badge on the map: the sheet's own state
+ * doesn't survive that, so the reopened sheet renders from this snapshot instead. See
+ * docs/features/html-overlay-marker.md.
+ *
  * `setExploreMode` (`explore-mode`'s building-exploration mode switch) has no direct response —
  * the resulting mode is reported back, like any other explore-mode change (including ones
  * triggered by map interaction, not this call), via `AndroidBridge.onExploreModeChanged`, also
@@ -199,6 +207,7 @@ fun FeatureMapScreen(
     var currentBaseUrl by remember { mutableStateOf(DEFAULT_SDK_BASE_URL) }
     var iconImagePlaced by remember { mutableStateOf<IconImagePlacementResult?>(null) }
     var textLabelPlaced by remember { mutableStateOf<TextLabelPlacementResult?>(null) }
+    var htmlMarkerState by remember { mutableStateOf<HtmlMarkerState?>(null) }
     val sheetState = rememberModalBottomSheetState()
 
     Scaffold(
@@ -341,6 +350,9 @@ fun FeatureMapScreen(
                                             textLabelPlaced = parseTextLabelPlacementPayload(requestId, resultJson)
                                         }
                                     },
+                                    notifyHtmlMarkerStateChanged = { stateJson ->
+                                        mainHandler.post { htmlMarkerState = parseHtmlMarkerStatePayload(stateJson) }
+                                    },
                                 ),
                                 "AndroidBridge",
                             )
@@ -403,6 +415,7 @@ fun FeatureMapScreen(
                     currentBaseUrl = currentBaseUrl,
                     iconImagePlaced = iconImagePlaced,
                     textLabelPlaced = textLabelPlaced,
+                    htmlMarkerState = htmlMarkerState,
                     onReloadWithBaseUrl = { newBaseUrl ->
                         loadState = MapLoadState.Loading
                         currentBaseUrl = newBaseUrl
@@ -432,6 +445,7 @@ private class MapBridge(
     private val notifyGeofenceStateChanged: (Boolean) -> Unit,
     private val notifyIconImagePlaced: (Int, String) -> Unit,
     private val notifyTextLabelPlaced: (Int, String) -> Unit,
+    private val notifyHtmlMarkerStateChanged: (String) -> Unit,
 ) {
     @JavascriptInterface
     fun onMapReady() = onReady()
@@ -491,4 +505,7 @@ private class MapBridge(
 
     @JavascriptInterface
     fun onTextLabelPlaced(requestId: Int, resultJson: String) = notifyTextLabelPlaced(requestId, resultJson)
+
+    @JavascriptInterface
+    fun onHtmlMarkerStateChanged(stateJson: String) = notifyHtmlMarkerStateChanged(stateJson)
 }

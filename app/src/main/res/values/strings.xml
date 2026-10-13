@@ -62,4 +62,6 @@
     <string name="feature_3d_icon_marker_description">Place a custom image at a spot on the 3D map</string>
     <string name="feature_custom_text_label_title">Custom text label</string>
     <string name="feature_custom_text_label_description">Place your own text on the map and restyle it live</string>
+    <string name="feature_html_overlay_marker_title">HTML overlay marker</string>
+    <string name="feature_html_overlay_marker_description">Pin a tappable HTML badge on the map that\'s never hidden by 3D</string>
 </resources>
