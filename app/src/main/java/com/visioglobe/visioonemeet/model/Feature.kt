@@ -114,6 +114,11 @@ enum class Feature(
         titleRes = R.string.feature_navigation_exclude_modalities_title,
         descriptionRes = R.string.feature_navigation_exclude_modalities_description,
     ),
+    AccessibleMode(
+        slug = "accessible-mode",
+        titleRes = R.string.feature_accessible_mode_title,
+        descriptionRes = R.string.feature_accessible_mode_description,
+    ),
     ;
 
     companion object {
