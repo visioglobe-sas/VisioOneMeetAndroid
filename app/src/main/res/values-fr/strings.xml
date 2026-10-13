@@ -57,4 +57,6 @@
     <string name="feature_navigation_exclude_modalities_description">Calculer un itinéraire évitant l\'ascenseur via l\'option excludedAttributes de computeNavigation.</string>
     <string name="feature_accessible_mode_title">Mode accessible</string>
     <string name="feature_accessible_mode_description">Calculer un itinéraire évitant les escaliers via l\'option isAccessible de computeNavigation.</string>
+    <string name="feature_3d_icon_marker_title">Icône 3D positionnée</string>
+    <string name="feature_3d_icon_marker_description">Placer une image personnalisée à un endroit de la carte 3D</string>
 </resources>

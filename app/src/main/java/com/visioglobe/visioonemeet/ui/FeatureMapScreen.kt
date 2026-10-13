@@ -79,6 +79,7 @@ data class FeatureBridgeState(
     val zoneResolved: ZoneResolution? = null,
     val isInsideGeofenceZone: Boolean = false,
     val currentBaseUrl: String = DEFAULT_SDK_BASE_URL,
+    val iconImagePlaced: IconImagePlacementResult? = null,
     val onReloadWithBaseUrl: (String) -> Unit = {},
 )
 
@@ -139,6 +140,10 @@ data class FeatureBridgeState(
  * on every call rather than only on a transition, via `AndroidBridge.onGeofenceStateChanged`,
  * surfaced via [FeatureBridgeState.isInsideGeofenceZone]. See docs/features/geofencing.md.
  *
+ * `placeIconImage` (`3d-icon-marker`'s anchor-POI lookup + `venue.createImage` round trip) reports
+ * its result back via `AndroidBridge.onIconImagePlaced`, surfaced via
+ * [FeatureBridgeState.iconImagePlaced]. See docs/features/3d-icon-marker.md.
+ *
  * `setExploreMode` (`explore-mode`'s building-exploration mode switch) has no direct response —
  * the resulting mode is reported back, like any other explore-mode change (including ones
  * triggered by map interaction, not this call), via `AndroidBridge.onExploreModeChanged`, also
@@ -187,6 +192,7 @@ fun FeatureMapScreen(
     var zoneResolved by remember { mutableStateOf<ZoneResolution?>(null) }
     var isInsideGeofenceZone by remember { mutableStateOf(false) }
     var currentBaseUrl by remember { mutableStateOf(DEFAULT_SDK_BASE_URL) }
+    var iconImagePlaced by remember { mutableStateOf<IconImagePlacementResult?>(null) }
     val sheetState = rememberModalBottomSheetState()
 
     Scaffold(
@@ -319,6 +325,11 @@ fun FeatureMapScreen(
                                     notifyGeofenceStateChanged = { isInside ->
                                         mainHandler.post { isInsideGeofenceZone = isInside }
                                     },
+                                    notifyIconImagePlaced = { requestId, resultJson ->
+                                        mainHandler.post {
+                                            iconImagePlaced = parseIconImagePlacementPayload(requestId, resultJson)
+                                        }
+                                    },
                                 ),
                                 "AndroidBridge",
                             )
@@ -379,6 +390,7 @@ fun FeatureMapScreen(
                     zoneResolved = zoneResolved,
                     isInsideGeofenceZone = isInsideGeofenceZone,
                     currentBaseUrl = currentBaseUrl,
+                    iconImagePlaced = iconImagePlaced,
                     onReloadWithBaseUrl = { newBaseUrl ->
                         loadState = MapLoadState.Loading
                         currentBaseUrl = newBaseUrl
@@ -406,6 +418,7 @@ private class MapBridge(
     private val notifyAddLocaleResolved: (Int, String) -> Unit,
     private val notifyZoneResolved: (Int, String) -> Unit,
     private val notifyGeofenceStateChanged: (Boolean) -> Unit,
+    private val notifyIconImagePlaced: (Int, String) -> Unit,
 ) {
     @JavascriptInterface
     fun onMapReady() = onReady()
@@ -459,4 +472,7 @@ private class MapBridge(
 
     @JavascriptInterface
     fun onGeofenceStateChanged(isInside: Boolean) = notifyGeofenceStateChanged(isInside)
+
+    @JavascriptInterface
+    fun onIconImagePlaced(requestId: Int, resultJson: String) = notifyIconImagePlaced(requestId, resultJson)
 }

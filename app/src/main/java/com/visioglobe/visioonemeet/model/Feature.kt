@@ -119,6 +119,11 @@ enum class Feature(
         titleRes = R.string.feature_accessible_mode_title,
         descriptionRes = R.string.feature_accessible_mode_description,
     ),
+    IconMarker3d(
+        slug = "3d-icon-marker",
+        titleRes = R.string.feature_3d_icon_marker_title,
+        descriptionRes = R.string.feature_3d_icon_marker_description,
+    ),
     ;
 
     companion object {
