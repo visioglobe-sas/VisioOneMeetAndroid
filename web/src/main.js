@@ -1,9 +1,11 @@
 import { createVisioOne } from '@visioglobe/visioone';
 
-// The Android app appends ?hash=<mapHash> when it loads this page (see
-// VisioOneWebView.kt), so the same bundle can display any map without a rebuild.
+// The Android app appends ?vg_maphash=<mapHash> when it loads this page (see
+// FeatureMapScreen.kt), so the same bundle can display any map without a rebuild.
+// `vg_maphash` is also the page-URL parameter the SDK (>= 1.0.9) itself reads to
+// override `LoadOptions.vg_maphash`, so both always agree.
 const DEFAULT_HASH = 'kbae8e6c066cca4b02c2afac2bc963a643d87437a';
-const hash = new URLSearchParams(window.location.search).get('hash') || DEFAULT_HASH;
+const hash = new URLSearchParams(window.location.search).get('vg_maphash') || DEFAULT_HASH;
 
 // `custom-base-url`: the SDK's own default `LoadOptions.baseURL` (confirmed by reading the SDK
 // source), used whenever the app doesn't append a `?baseUrl=` override (every screen except that
@@ -680,7 +682,7 @@ function onPoiClick(event) {
 async function main() {
   try {
     const visioOne = createVisioOne();
-    venue = await visioOne.loadVenue({ hash, baseURL });
+    venue = await visioOne.loadVenue({ vg_maphash: hash, baseURL });
     view = await visioOne.createView(container, venue);
     view.addEventListener('poiclick', onPoiClick);
     view.addEventListener('currentfloorchanged', onCurrentFloorChanged);

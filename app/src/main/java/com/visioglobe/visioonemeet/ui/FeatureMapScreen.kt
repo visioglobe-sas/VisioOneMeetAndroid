@@ -333,7 +333,7 @@ fun FeatureMapScreen(
                             val encodedBaseUrl = URLEncoder.encode(currentBaseUrl, "UTF-8")
                             loadUrl(
                                 "https://$ASSET_LOADER_DOMAIN/assets/www/index.html" +
-                                    "?hash=$mapHash&baseUrl=$encodedBaseUrl",
+                                    "?vg_maphash=$mapHash&baseUrl=$encodedBaseUrl",
                             )
                         }.also { webView = it }
                     },
