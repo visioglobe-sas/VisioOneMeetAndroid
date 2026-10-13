@@ -18,7 +18,7 @@ const baseURL = new URLSearchParams(window.location.search).get('baseUrl') || DE
 async function main() {
   try {
     const visioOne = createVisioOne();
-    venue = await visioOne.loadVenue({ hash, baseURL });
+    venue = await visioOne.loadVenue({ vg_maphash: hash, baseURL });
     view = await visioOne.createView(container, venue);
     // ...
     bridge?.onMapReady();
@@ -38,7 +38,7 @@ key(mapHash, currentBaseUrl) {
             val encodedBaseUrl = URLEncoder.encode(currentBaseUrl, "UTF-8")
             loadUrl(
                 "https://$ASSET_LOADER_DOMAIN/assets/www/index.html" +
-                    "?hash=$mapHash&baseUrl=$encodedBaseUrl",
+                    "?vg_maphash=$mapHash&baseUrl=$encodedBaseUrl",
             )
         }.also { webView = it }
     )

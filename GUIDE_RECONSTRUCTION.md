@@ -2,7 +2,7 @@
 
 Une application Android (Kotlin + Jetpack Compose) qui affiche un plan intérieur VisioOne dans une WebView, en pontant un bundle web Vite avec la couche native via `WebViewAssetLoader`.
 
-**Stack :** Kotlin 2.2.20 · Jetpack Compose · AGP 9.3.0 · Gradle 9.6.1 · Vite 5 · `@visioglobe/visioone` 1.0.5
+**Stack :** Kotlin 2.2.20 · Jetpack Compose · AGP 9.3.0 · Gradle 9.6.1 · Vite 5 · `@visioglobe/visioone` 1.0.9
 
 ## Sommaire
 
@@ -53,7 +53,7 @@ graph TB
   end
 
   MA -->|passe mapHash| VMS
-  VMS -->|loadUrl ?hash=...| ASL
+  VMS -->|loadUrl ?vg_maphash=...| ASL
   ASL -->|sert /assets/www/*| HTML
   HTML --> JS
   JS -->|createVisioOne / loadVenue / createView| SDK
@@ -86,10 +86,10 @@ sequenceDiagram
   participant MS as mapserver.visioglobe.com
 
   U->>CA: Lance l'application
-  CA->>WV: loadUrl("https://appassets.androidx.local/assets/www/index.html?hash=...")
+  CA->>WV: loadUrl("https://appassets.androidx.local/assets/www/index.html?vg_maphash=...")
   WV->>JS: exécute le bundle (module ES)
   JS->>SDK: createVisioOne()
-  JS->>SDK: loadVenue({ hash })
+  JS->>SDK: loadVenue({ vg_maphash: hash })
   SDK->>MS: requêtes réseau (carte, POI, meshes 3D)
   MS-->>SDK: assets de la carte
   SDK-->>JS: venue chargée
@@ -284,7 +284,7 @@ C'est un projet Vite indépendant, séparé du projet Gradle, dont la seule miss
     "build": "vite build"
   },
   "dependencies": {
-    "@visioglobe/visioone": "1.0.5"
+    "@visioglobe/visioone": "1.0.9"
   },
   "devDependencies": {
     "vite": "^5.4.0"
@@ -342,11 +342,11 @@ export default defineConfig({
 ```javascript
 import { createVisioOne } from '@visioglobe/visioone';
 
-// L'app Android ajoute ?hash=<mapHash> en chargeant cette page (voir
+// L'app Android ajoute ?vg_maphash=<mapHash> en chargeant cette page (voir
 // VisioOneMapScreen.kt), donc le même bundle peut afficher n'importe quelle
 // carte sans reconstruction.
 const DEFAULT_HASH = 'kbae8e6c066cca4b02c2afac2bc963a643d87437a';
-const hash = new URLSearchParams(window.location.search).get('hash') || DEFAULT_HASH;
+const hash = new URLSearchParams(window.location.search).get('vg_maphash') || DEFAULT_HASH;
 
 const container = document.querySelector('#content');
 
@@ -357,7 +357,7 @@ const bridge = window.AndroidBridge;
 async function main() {
   try {
     const visioOne = createVisioOne();
-    const venue = await visioOne.loadVenue({ hash });
+    const venue = await visioOne.loadVenue({ vg_maphash: hash });
     await visioOne.createView(container, venue);
     bridge?.onMapReady();
   } catch (error) {
@@ -466,7 +466,7 @@ fun VisioOneMapScreen(mapHash: String, modifier: Modifier = Modifier) {
                         ): WebResourceResponse? = assetLoader.shouldInterceptRequest(request.url)
                     }
 
-                    loadUrl("https://$ASSET_LOADER_DOMAIN/assets/www/index.html?hash=$mapHash")
+                    loadUrl("https://$ASSET_LOADER_DOMAIN/assets/www/index.html?vg_maphash=$mapHash")
                 }
             },
         )
