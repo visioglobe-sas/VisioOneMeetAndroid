@@ -63,4 +63,7 @@
     <string name="feature_custom_text_label_description">Placez votre propre texte sur la carte et modifiez son style en direct</string>
     <string name="feature_html_overlay_marker_title">Marqueur HTML superposé</string>
     <string name="feature_html_overlay_marker_description">Épinglez sur la carte un badge HTML cliquable, jamais masqué par la 3D</string>
+    <string name="feature_custom_theme_title">Thème personnalisé</string>
+    <string name="feature_custom_theme_description">Changez l\'ambiance lumineuse 3D et recolorez les boutons du SDK en direct</string>
+    <string name="custom_theme_hint">Touchez un lieu : le bouton Go de sa fiche utilise les couleurs d\'accent.</string>
 </resources>

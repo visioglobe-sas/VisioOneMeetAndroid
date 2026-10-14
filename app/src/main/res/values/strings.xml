@@ -64,4 +64,7 @@
     <string name="feature_custom_text_label_description">Place your own text on the map and restyle it live</string>
     <string name="feature_html_overlay_marker_title">HTML overlay marker</string>
     <string name="feature_html_overlay_marker_description">Pin a tappable HTML badge on the map that\'s never hidden by 3D</string>
+    <string name="feature_custom_theme_title">Custom theme</string>
+    <string name="feature_custom_theme_description">Switch the 3D lighting theme and recolor the SDK\'s buttons live</string>
+    <string name="custom_theme_hint">Tap a place: its card\'s Go button uses the accent colors.</string>
 </resources>
