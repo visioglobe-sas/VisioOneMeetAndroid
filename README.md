@@ -68,6 +68,7 @@ Each feature below is a self-contained screen in the app demonstrating one Visio
 - [Accessible Mode](docs/features/accessible-mode.md) — compute a route that avoids stairs via `venue.computeNavigation()`'s `isAccessible` option.
 - [3D Icon Marker](docs/features/3d-icon-marker.md) — place a custom image at a spot on the 3D map via `venue.createImage()`, switching its orientation live via `venue.updateImage()` and removing it via `venue.removeImage()`.
 - [Custom Text Label](docs/features/custom-text-label.md) — place your own free text on the map via `venue.createLabel()`, restyling it live via `venue.updateLabel()` and removing it via `venue.removeLabel()`.
+- [HTML Overlay Marker](docs/features/html-overlay-marker.md) — pin a tappable HTML badge on the map, never hidden by 3D geometry, via `venue.createMarker()`, toggling it via `venue.updateMarker()` and removing it via `venue.removeMarker()`; taps are forwarded to native over the bridge.
 
 ## How it works
 

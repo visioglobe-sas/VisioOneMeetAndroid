@@ -104,11 +104,13 @@ function isPositionInsidePolygon(position, polygonPositions) {
 // an existing "anchor" POI's position. Returns undefined when the POI has
 // none of the three. `excludedLabel` (optional) is skipped, so a caller whose
 // own label is still attached to the anchor (custom-text-label) never copies
-// it instead of the map's own data. See docs/features/dynamic-poi-crud.md.
-function anchorPositionOf(poi, excludedLabel = null) {
+// it instead of the map's own data; `excludedMarker` (optional) does the same
+// for a caller's own marker (html-overlay-marker). See
+// docs/features/dynamic-poi-crud.md.
+function anchorPositionOf(poi, excludedLabel = null, excludedMarker = null) {
   return (
     poi.labels.find((label) => label !== excludedLabel)?.position ??
-    poi.markers[0]?.position ??
+    poi.markers.find((marker) => marker !== excludedMarker)?.position ??
     poi.images[0]?.position
   );
 }
@@ -134,6 +136,39 @@ let customTextLabel = null;
 // venue's latitude), so the custom text doesn't sit on top of the map's own
 // label for that POI. See docs/features/custom-text-label.md.
 const CUSTOM_TEXT_LABEL_OFFSET = 0.00004;
+
+// The HTML Marker placed by placeHtmlMarker (html-overlay-marker), tracked so
+// the update/visibility/remove commands know what to act on, plus how many
+// times its badge was tapped since it was placed. Only one at a time — a
+// demo-side simplification, not an SDK limitation. See
+// docs/features/html-overlay-marker.md.
+let htmlMarker = null;
+let htmlMarkerTapCount = 0;
+
+// Inline style of the badge element. Deliberately no transform/translate/
+// position/top/left: the SDK owns those on a marker's element (it centers it
+// on the marker's position and moves it every frame). See
+// docs/features/html-overlay-marker.md.
+const HTML_MARKER_STYLE =
+  'background:#0B6BCB;color:#FFFFFF;font:600 14px sans-serif;padding:6px 12px;border-radius:14px;' +
+  'white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,.3);cursor:pointer';
+
+// Reports the badge's whole state to native after every html-overlay-marker
+// command and every tap — the JS side is the single source of truth, so the
+// native panel can be closed (to tap the badge) and reopened without losing
+// track of it. `status` names what just happened. See
+// docs/features/html-overlay-marker.md.
+function reportHtmlMarkerState(status, extra) {
+  bridge?.onHtmlMarkerStateChanged(
+    JSON.stringify({
+      status,
+      placedOnPoiId: htmlMarker?.poi.id ?? null,
+      isVisible: htmlMarker?.isVisible ?? true,
+      tapCount: htmlMarkerTapCount,
+      ...extra,
+    }),
+  );
+}
 
 // Native -> JS bridge: one method per command, called from Kotlin via
 // WebView.evaluateJavascript(). Kotlin JSON-encodes arguments before
@@ -673,6 +708,98 @@ window.MapBridge = {
     if (!venue || !customTextLabel) return;
     venue.removeLabel(customTextLabel);
     customTextLabel = null;
+  },
+  // Pins an HTML element (a `div` badge) on the map via venue.createMarker,
+  // owned by the anchor POI, at that POI's own position (copied via
+  // anchorPositionOf, skipping our own marker, which sits in poi.markers once
+  // placed) offset by CUSTOM_TEXT_LABEL_OFFSET. Text, anchor and anchor
+  // position are validated BEFORE touching the badge already placed: a failed
+  // place leaves it untouched. The SDK forces `pointer-events: none` on the
+  // element at creation, so it's set back to `auto` right after, making the
+  // badge tappable; its click is stopped there (so it never reaches the map
+  // and opens the POI underneath) and forwarded to native. On success the
+  // camera moves to the anchor via goToPlace (goto-poi), since a marker only
+  // shows while its POI's floor is displayed. See
+  // docs/features/html-overlay-marker.md.
+  placeHtmlMarker(anchorId, text) {
+    if (!venue) return;
+    const trimmed = String(text ?? '').trim();
+    if (!trimmed) {
+      reportHtmlMarkerState('text-required');
+      return;
+    }
+    const anchor = venue.pois.find((p) => p.id === anchorId);
+    if (!anchor) {
+      reportHtmlMarkerState('anchor-not-found');
+      return;
+    }
+    const anchorPosition = anchorPositionOf(anchor, null, htmlMarker);
+    if (!anchorPosition) {
+      reportHtmlMarkerState('anchor-has-no-position');
+      return;
+    }
+    window.MapBridge.removeHtmlMarker({ silent: true });
+    const position = {
+      ...anchorPosition,
+      latitude: anchorPosition.latitude + CUSTOM_TEXT_LABEL_OFFSET,
+      longitude: anchorPosition.longitude + CUSTOM_TEXT_LABEL_OFFSET,
+    };
+    const element = document.createElement('div');
+    element.style.cssText = HTML_MARKER_STYLE;
+    element.textContent = trimmed;
+    try {
+      const marker = venue.createMarker({ poi: anchor, position, element });
+      element.style.pointerEvents = 'auto';
+      element.addEventListener('click', (event) => {
+        event.stopPropagation();
+        if (htmlMarker !== marker) return;
+        htmlMarkerTapCount += 1;
+        reportHtmlMarkerState('tapped');
+      });
+      htmlMarker = marker;
+      htmlMarkerTapCount = 0;
+      reportHtmlMarkerState('placed');
+      window.MapBridge.goToPlace(anchor.id);
+    } catch (error) {
+      reportHtmlMarkerState('error', { message: String(error?.message ?? error) });
+    }
+  },
+  // Changes the badge's text. No SDK call: marker.element is a live DOM node,
+  // so a plain DOM edit is all it takes. A no-op if nothing is placed. See
+  // docs/features/html-overlay-marker.md.
+  updateHtmlMarkerText(text) {
+    if (!venue || !htmlMarker) return;
+    const trimmed = String(text ?? '').trim();
+    if (!trimmed) {
+      reportHtmlMarkerState('text-required');
+      return;
+    }
+    htmlMarker.element.textContent = trimmed;
+    reportHtmlMarkerState('text-updated');
+  },
+  // Shows/hides the badge via venue.updateMarker's isVisible (the element
+  // stays in the DOM, display:none). A no-op if nothing is placed. See
+  // docs/features/html-overlay-marker.md.
+  setHtmlMarkerVisible(isVisible) {
+    if (!venue || !htmlMarker) return;
+    venue.updateMarker(htmlMarker, { isVisible });
+    reportHtmlMarkerState(isVisible ? 'shown' : 'hidden');
+  },
+  // Removes the badge via venue.removeMarker (which also detaches the element
+  // from the DOM), forgets it — the SDK throws "Provided marker is not
+  // registered" on a second removal — and reverts goToPlace's highlight. A
+  // no-op if nothing is placed. `silent` skips the state report (used by
+  // placeHtmlMarker, which reports once itself). See
+  // docs/features/html-overlay-marker.md.
+  removeHtmlMarker({ silent = false } = {}) {
+    if (!venue || !htmlMarker) return;
+    venue.removeMarker(htmlMarker);
+    htmlMarker = null;
+    htmlMarkerTapCount = 0;
+    if (!silent) {
+      window.MapBridge.clearPlace();
+      reportHtmlMarkerState('removed');
+    }
   },
   // Reports the venue's currentLocale back to native in one round trip, so
   // the runtime-locale sheet can highlight whichever option is already

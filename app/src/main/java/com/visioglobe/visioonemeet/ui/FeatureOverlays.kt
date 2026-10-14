@@ -2605,3 +2605,164 @@ fun CustomTextLabelOverlay(webView: WebView?, textLabelPlaced: TextLabelPlacemen
         }
     }
 }
+
+/**
+ * Prefilled anchor POI for `html-overlay-marker` — same "Restaurant" POI (B4 ground floor) as
+ * [TEXT_LABEL_DEFAULT_ANCHOR_ID]. See docs/features/html-overlay-marker.md.
+ */
+private const val HTML_MARKER_DEFAULT_ANCHOR_ID = TEXT_LABEL_DEFAULT_ANCHOR_ID
+
+private const val HTML_MARKER_DEFAULT_TEXT = "Open now · 12:00–14:00"
+
+/**
+ * Pins the demo HTML badge on [anchorId] by calling `window.MapBridge.placeHtmlMarker` in the
+ * WebView (`venue.createMarker` under the hood, with a `div` element the bridge JS builds). The
+ * outcome comes back via `AndroidBridge.onHtmlMarkerStateChanged`, like every other badge state
+ * change. See docs/features/html-overlay-marker.md.
+ */
+private fun WebView.placeHtmlMarker(anchorId: String, text: String) {
+    val script = "window.MapBridge.placeHtmlMarker(${JSONObject.quote(anchorId)}, ${JSONObject.quote(text)})"
+    evaluateJavascript(script, null)
+}
+
+/**
+ * Replaces the placed badge's text via `window.MapBridge.updateHtmlMarkerText` — a plain DOM edit
+ * on the marker's element, no SDK call. See docs/features/html-overlay-marker.md.
+ */
+private fun WebView.updateHtmlMarkerText(text: String) {
+    evaluateJavascript("window.MapBridge.updateHtmlMarkerText(${JSONObject.quote(text)})", null)
+}
+
+/**
+ * Shows/hides the placed badge via `window.MapBridge.setHtmlMarkerVisible`
+ * (`venue.updateMarker(marker, { isVisible })` under the hood). See
+ * docs/features/html-overlay-marker.md.
+ */
+private fun WebView.setHtmlMarkerVisible(isVisible: Boolean) {
+    evaluateJavascript("window.MapBridge.setHtmlMarkerVisible($isVisible)", null)
+}
+
+/**
+ * Removes the placed badge via `window.MapBridge.removeHtmlMarker` (`venue.removeMarker` under the
+ * hood). A no-op on the JS side if nothing is placed. See docs/features/html-overlay-marker.md.
+ */
+private fun WebView.removeHtmlMarker() {
+    evaluateJavascript("window.MapBridge.removeHtmlMarker()", null)
+}
+
+/**
+ * The badge's whole state, as reported by `AndroidBridge.onHtmlMarkerStateChanged` after every
+ * `html-overlay-marker` command and every tap on the badge. [status] names what just happened:
+ * `"placed"`, `"tapped"`, `"text-updated"`, `"hidden"`, `"shown"`, `"removed"`,
+ * `"text-required"`, `"anchor-not-found"`, `"anchor-has-no-position"` or `"error"` ([message]
+ * carrying its text). [placedOnPoiId] is null while no badge is placed; [tapCount] counts taps on
+ * the badge since it was last placed.
+ */
+data class HtmlMarkerState(
+    val status: String,
+    val placedOnPoiId: String?,
+    val isVisible: Boolean,
+    val tapCount: Int,
+    val message: String? = null,
+)
+
+/** Parses the JSON object argument of `AndroidBridge.onHtmlMarkerStateChanged`. */
+internal fun parseHtmlMarkerStatePayload(json: String): HtmlMarkerState {
+    val root = JSONObject(json)
+    return HtmlMarkerState(
+        status = root.getString("status"),
+        placedOnPoiId = if (root.isNull("placedOnPoiId")) null else root.getString("placedOnPoiId"),
+        isVisible = root.getBoolean("isVisible"),
+        tapCount = root.getInt("tapCount"),
+        message = if (root.has("message")) root.getString("message") else null,
+    )
+}
+
+/**
+ * FAB-triggered control for `html-overlay-marker`: "Anchor POI ID" and "Badge text" fields, Place
+ * badge/Update text/Hide-Show badge/Remove badge buttons and a status line. Everything except the
+ * two fields is rendered from [htmlMarkerState] — the JS side is the source of truth (validation
+ * included), and this sheet is disposed whenever it's closed, which it has to be to tap the badge
+ * on the map. The badge's taps reach native as a `"tapped"` state with the running [HtmlMarkerState.tapCount].
+ * See docs/features/html-overlay-marker.md.
+ */
+@Composable
+fun HtmlOverlayMarkerOverlay(webView: WebView?, htmlMarkerState: HtmlMarkerState?) {
+    var anchorId by remember { mutableStateOf(HTML_MARKER_DEFAULT_ANCHOR_ID) }
+    var text by remember { mutableStateOf(HTML_MARKER_DEFAULT_TEXT) }
+    val placedOnPoiId = htmlMarkerState?.placedOnPoiId
+    val isVisible = htmlMarkerState?.isVisible ?: true
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp),
+    ) {
+        OutlinedTextField(
+            value = anchorId,
+            onValueChange = { anchorId = it },
+            label = { Text("Anchor POI ID") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        OutlinedTextField(
+            value = text,
+            onValueChange = { text = it },
+            label = { Text("Badge text") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+        FlowRow(modifier = Modifier.fillMaxWidth()) {
+            Button(
+                onClick = { webView?.placeHtmlMarker(anchorId.trim(), text) },
+                enabled = anchorId.isNotBlank(),
+                modifier = Modifier.padding(end = 8.dp),
+            ) {
+                Text("Place badge")
+            }
+            OutlinedButton(
+                onClick = { webView?.updateHtmlMarkerText(text) },
+                enabled = placedOnPoiId != null,
+                modifier = Modifier.padding(end = 8.dp),
+            ) {
+                Text("Update text")
+            }
+            OutlinedButton(
+                onClick = { webView?.setHtmlMarkerVisible(!isVisible) },
+                enabled = placedOnPoiId != null,
+                modifier = Modifier.padding(end = 8.dp),
+            ) {
+                Text(if (isVisible) "Hide badge" else "Show badge")
+            }
+            OutlinedButton(
+                onClick = { webView?.removeHtmlMarker() },
+                enabled = placedOnPoiId != null,
+            ) {
+                Text("Remove badge")
+            }
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        val errorMessage = when (htmlMarkerState?.status) {
+            "text-required" -> "Text is required"
+            "anchor-not-found" -> "POI not found"
+            "anchor-has-no-position" -> "This POI has no position"
+            "error" -> htmlMarkerState.message ?: "Could not place the badge"
+            else -> null
+        }
+        if (errorMessage != null) {
+            Text(text = errorMessage, color = MaterialTheme.colorScheme.error)
+        } else {
+            val statusMessage = when (htmlMarkerState?.status) {
+                "placed" -> "Badge placed on $placedOnPoiId"
+                "tapped" -> "Badge tapped (${htmlMarkerState.tapCount})"
+                "text-updated" -> "Text updated"
+                "hidden" -> "Badge hidden"
+                "shown" -> "Badge shown"
+                else -> "No badge placed"
+            }
+            Text(text = statusMessage, style = MaterialTheme.typography.bodyMedium)
+        }
+    }
+}

@@ -61,4 +61,6 @@
     <string name="feature_3d_icon_marker_description">Placer une image personnalisée à un endroit de la carte 3D</string>
     <string name="feature_custom_text_label_title">Label texte personnalisé</string>
     <string name="feature_custom_text_label_description">Placez votre propre texte sur la carte et modifiez son style en direct</string>
+    <string name="feature_html_overlay_marker_title">Marqueur HTML superposé</string>
+    <string name="feature_html_overlay_marker_description">Épinglez sur la carte un badge HTML cliquable, jamais masqué par la 3D</string>
 </resources>
