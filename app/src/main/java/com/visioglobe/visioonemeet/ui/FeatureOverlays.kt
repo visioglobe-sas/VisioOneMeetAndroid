@@ -2766,3 +2766,179 @@ fun HtmlOverlayMarkerOverlay(webView: WebView?, htmlMarkerState: HtmlMarkerState
         }
     }
 }
+
+/** The SDK's own defaults for `custom-theme` (the theme a view starts with, View.d.ts `@defaultValue`s). */
+private const val THEME_DEFAULT_ACCENT_COLOR = "#0094F0"
+private const val THEME_DEFAULT_TEXT_ACCENT_COLOR = "#FFFFFF"
+
+/** Accent colors offered for `view.accentColor` (hex — the SDK only accepts hex / `rgb(a)` / `hsl`). */
+private val THEME_ACCENT_COLORS = listOf(
+    THEME_DEFAULT_ACCENT_COLOR to "Visioglobe blue",
+    "#E53935" to "Red",
+    "#43A047" to "Green",
+    "#8E24AA" to "Purple",
+)
+
+/** Text colors offered for `view.textAccentColor`. */
+private val THEME_TEXT_ACCENT_COLORS = listOf(
+    THEME_DEFAULT_TEXT_ACCENT_COLOR to "White",
+    "#FFEB3B" to "Yellow",
+    "#212121" to "Black",
+)
+
+/**
+ * Asks the bridge for the current `custom-theme` state (`view.themes` + the current theme and
+ * accent colors) via `window.MapBridge.getThemeState`; the answer comes back via
+ * `AndroidBridge.onThemeStateChanged`. See docs/features/custom-theme.md.
+ */
+private fun WebView.getThemeState() {
+    evaluateJavascript("window.MapBridge.getThemeState()", null)
+}
+
+/** Applies a scene theme via `window.MapBridge.setTheme` (`view.setTheme` under the hood). */
+private fun WebView.setTheme(themeName: String) {
+    evaluateJavascript("window.MapBridge.setTheme(${JSONObject.quote(themeName)})", null)
+}
+
+/** Recolors the SDK's UI buttons via `window.MapBridge.setAccentColor` (`view.accentColor = color`). */
+private fun WebView.setAccentColor(color: String) {
+    evaluateJavascript("window.MapBridge.setAccentColor(${JSONObject.quote(color)})", null)
+}
+
+/** Recolors the SDK's UI button text via `window.MapBridge.setTextAccentColor` (`view.textAccentColor = color`). */
+private fun WebView.setTextAccentColor(color: String) {
+    evaluateJavascript("window.MapBridge.setTextAccentColor(${JSONObject.quote(color)})", null)
+}
+
+/** Back to the 'day' theme and the default accent colors via `window.MapBridge.resetTheme`. */
+private fun WebView.resetTheme() {
+    evaluateJavascript("window.MapBridge.resetTheme()", null)
+}
+
+/**
+ * The whole `custom-theme` state, as reported by `AndroidBridge.onThemeStateChanged` after every
+ * command. [themes] is `view.themes` as-is; [currentTheme] is tracked JS-side (the SDK has no
+ * getter for it); [accentColor]/[textAccentColor] are read back from the view (the SDK returns
+ * whatever string was set, its own defaults in lowercase hex). [status] names what just happened —
+ * `"loaded"`, `"theme-applied"`, `"accent-applied"`, `"text-accent-applied"`, `"reset"` or
+ * `"error"` ([message] carrying the SDK's error text).
+ */
+data class ThemeState(
+    val status: String,
+    val themes: List<String>,
+    val currentTheme: String,
+    val accentColor: String,
+    val textAccentColor: String,
+    val message: String? = null,
+)
+
+/** Parses the JSON object argument of `AndroidBridge.onThemeStateChanged`. */
+internal fun parseThemeStatePayload(json: String): ThemeState {
+    val root = JSONObject(json)
+    val themes = root.getJSONArray("themes")
+    return ThemeState(
+        status = root.getString("status"),
+        themes = List(themes.length()) { themes.getString(it) },
+        currentTheme = root.getString("currentTheme"),
+        accentColor = root.getString("accentColor"),
+        textAccentColor = root.getString("textAccentColor"),
+        message = if (root.has("message")) root.getString("message") else null,
+    )
+}
+
+/**
+ * One color choice chip. The swatch gets an outline in the panel's content color, so the dark
+ * (Black) and light (White/Yellow) swatches stay visible on either a dark or a light sheet.
+ */
+@Composable
+private fun ThemeColorChip(hex: String, name: String, selected: Boolean, onClick: () -> Unit) {
+    FilterChip(
+        selected = selected,
+        onClick = onClick,
+        label = { Text(name) },
+        leadingIcon = {
+            Box(
+                modifier = Modifier
+                    .size(14.dp)
+                    .clip(CircleShape)
+                    .background(Color(hex.toColorInt()))
+                    .border(1.dp, MaterialTheme.colorScheme.onSurface, CircleShape),
+            )
+        },
+        modifier = Modifier.padding(end = 8.dp),
+    )
+}
+
+/**
+ * FAB-triggered control for `custom-theme`: a segmented control built at runtime from
+ * `view.themes` (raw SDK ids), accent color and accent text color chips, a Reset button, a hint
+ * and a status line. Every change applies immediately. Everything is rendered from [themeState] —
+ * the JS side is the source of truth, and this sheet is disposed whenever it's closed, which it
+ * has to be to tap a place and see its card's accent-colored buttons. The state is requested once
+ * when the sheet opens. See docs/features/custom-theme.md.
+ */
+@Composable
+fun CustomThemeOverlay(webView: WebView?, themeState: ThemeState?) {
+    LaunchedEffect(webView) { webView?.getThemeState() }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp),
+    ) {
+        Text(text = "Theme", style = MaterialTheme.typography.labelLarge)
+        val themes = themeState?.themes.orEmpty()
+        if (themes.isEmpty()) {
+            Text(text = "Loading themes…", style = MaterialTheme.typography.bodyMedium)
+        } else {
+            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                themes.forEachIndexed { index, themeName ->
+                    SegmentedButton(
+                        selected = themeName == themeState?.currentTheme,
+                        onClick = { webView?.setTheme(themeName) },
+                        shape = SegmentedButtonDefaults.itemShape(index = index, count = themes.size),
+                    ) {
+                        Text(themeName, maxLines = 1)
+                    }
+                }
+            }
+        }
+        Spacer(modifier = Modifier.height(12.dp))
+        Text(text = "Accent color", style = MaterialTheme.typography.labelLarge)
+        FlowRow(modifier = Modifier.fillMaxWidth()) {
+            THEME_ACCENT_COLORS.forEach { (hex, name) ->
+                ThemeColorChip(
+                    hex = hex,
+                    name = name,
+                    selected = hex.equals(themeState?.accentColor ?: THEME_DEFAULT_ACCENT_COLOR, ignoreCase = true),
+                    onClick = { webView?.setAccentColor(hex) },
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(text = "Accent text color", style = MaterialTheme.typography.labelLarge)
+        FlowRow(modifier = Modifier.fillMaxWidth()) {
+            THEME_TEXT_ACCENT_COLORS.forEach { (hex, name) ->
+                ThemeColorChip(
+                    hex = hex,
+                    name = name,
+                    selected = hex.equals(
+                        themeState?.textAccentColor ?: THEME_DEFAULT_TEXT_ACCENT_COLOR,
+                        ignoreCase = true,
+                    ),
+                    onClick = { webView?.setTextAccentColor(hex) },
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(12.dp))
+        OutlinedButton(onClick = { webView?.resetTheme() }) {
+            Text("Reset")
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(text = stringResource(R.string.custom_theme_hint), style = MaterialTheme.typography.bodyMedium)
+        if (themeState?.status == "error") {
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(text = themeState.message ?: "Could not apply the change", color = MaterialTheme.colorScheme.error)
+        }
+    }
+}

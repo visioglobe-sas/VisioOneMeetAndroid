@@ -19,6 +19,7 @@ import com.visioglobe.visioonemeet.ui.CustomBaseUrlOverlay
 import com.visioglobe.visioonemeet.ui.CustomDataOverlay
 import com.visioglobe.visioonemeet.ui.CustomNavigationTraceOverlay
 import com.visioglobe.visioonemeet.ui.CustomTextLabelOverlay
+import com.visioglobe.visioonemeet.ui.CustomThemeOverlay
 import com.visioglobe.visioonemeet.ui.DynamicPoiCrudOverlay
 import com.visioglobe.visioonemeet.ui.ExploreModeOverlay
 import com.visioglobe.visioonemeet.ui.FeatureMapScreen
@@ -69,6 +70,9 @@ class MainActivity : ComponentActivity() {
                             titleRes = feature?.titleRes,
                             modifier = Modifier.fillMaxSize(),
                             reactsToPoiClicks = feature == Feature.PoiClick,
+                            // Themes only change the scene lights, rendered only with shadows on —
+                            // see docs/features/custom-theme.md.
+                            enableShadows = feature == Feature.CustomTheme,
                             onMapReady = { webView ->
                                 // Hides the SDK's own default floor-selector widget as soon as the
                                 // map loads, matching NativeUiReplacementOverlay's switch, which
@@ -127,6 +131,7 @@ class MainActivity : ComponentActivity() {
                                         CustomTextLabelOverlay(webView, bridgeState.textLabelPlaced)
                                     Feature.HtmlOverlayMarker ->
                                         HtmlOverlayMarkerOverlay(webView, bridgeState.htmlMarkerState)
+                                    Feature.CustomTheme -> CustomThemeOverlay(webView, bridgeState.themeState)
                                     null -> Unit
                                 }
                             },

@@ -82,6 +82,7 @@ data class FeatureBridgeState(
     val iconImagePlaced: IconImagePlacementResult? = null,
     val textLabelPlaced: TextLabelPlacementResult? = null,
     val htmlMarkerState: HtmlMarkerState? = null,
+    val themeState: ThemeState? = null,
     val onReloadWithBaseUrl: (String) -> Unit = {},
 )
 
@@ -157,6 +158,12 @@ data class FeatureBridgeState(
  * doesn't survive that, so the reopened sheet renders from this snapshot instead. See
  * docs/features/html-overlay-marker.md.
  *
+ * Every `custom-theme` command (theme state lookup/set theme/set accent colors/reset) reports the
+ * whole theme state back via `AndroidBridge.onThemeStateChanged`, surfaced via
+ * [FeatureBridgeState.themeState] — kept here for the same reason as `htmlMarkerState`: the
+ * visitor closes the sheet to tap a place and see its card's accent-colored buttons. See
+ * docs/features/custom-theme.md.
+ *
  * `setExploreMode` (`explore-mode`'s building-exploration mode switch) has no direct response —
  * the resulting mode is reported back, like any other explore-mode change (including ones
  * triggered by map interaction, not this call), via `AndroidBridge.onExploreModeChanged`, also
@@ -171,6 +178,11 @@ data class FeatureBridgeState(
  * the old WebView and runs `factory` again from scratch. Every other screen just keeps using the
  * default value, so nothing changes for them. See docs/features/custom-base-url.md.
  *
+ * [enableShadows] appends `&enableShadows=true` to the bridge page URL, which then passes
+ * `{ enableShadows: true }` to `createView` — only `custom-theme` sets it, since a theme only
+ * changes the scene lights, which are only rendered with shadows/lights enabled (and shadows are
+ * costly, so every other screen keeps the SDK default). See docs/features/custom-theme.md.
+ *
  * [onMapReady] fires once, right after [MapLoadState.Ready] is reached, with the live [WebView] —
  * for a screen that needs to drive the bridge before the visitor ever opens the FAB's bottom
  * sheet. `native-ui-replacement` is the only user of it today: it hides the SDK's own default
@@ -184,6 +196,7 @@ fun FeatureMapScreen(
     titleRes: Int?,
     modifier: Modifier = Modifier,
     reactsToPoiClicks: Boolean = false,
+    enableShadows: Boolean = false,
     onMapReady: (WebView) -> Unit = {},
     onBack: () -> Unit,
     sheetContent: @Composable (webView: WebView?, bridgeState: FeatureBridgeState) -> Unit,
@@ -208,6 +221,7 @@ fun FeatureMapScreen(
     var iconImagePlaced by remember { mutableStateOf<IconImagePlacementResult?>(null) }
     var textLabelPlaced by remember { mutableStateOf<TextLabelPlacementResult?>(null) }
     var htmlMarkerState by remember { mutableStateOf<HtmlMarkerState?>(null) }
+    var themeState by remember { mutableStateOf<ThemeState?>(null) }
     val sheetState = rememberModalBottomSheetState()
 
     Scaffold(
@@ -353,6 +367,9 @@ fun FeatureMapScreen(
                                     notifyHtmlMarkerStateChanged = { stateJson ->
                                         mainHandler.post { htmlMarkerState = parseHtmlMarkerStatePayload(stateJson) }
                                     },
+                                    notifyThemeStateChanged = { stateJson ->
+                                        mainHandler.post { themeState = parseThemeStatePayload(stateJson) }
+                                    },
                                 ),
                                 "AndroidBridge",
                             )
@@ -367,7 +384,8 @@ fun FeatureMapScreen(
                             val encodedBaseUrl = URLEncoder.encode(currentBaseUrl, "UTF-8")
                             loadUrl(
                                 "https://$ASSET_LOADER_DOMAIN/assets/www/index.html" +
-                                    "?vg_maphash=$mapHash&baseUrl=$encodedBaseUrl",
+                                    "?vg_maphash=$mapHash&baseUrl=$encodedBaseUrl" +
+                                    if (enableShadows) "&enableShadows=true" else "",
                             )
                         }.also { webView = it }
                     },
@@ -416,6 +434,7 @@ fun FeatureMapScreen(
                     iconImagePlaced = iconImagePlaced,
                     textLabelPlaced = textLabelPlaced,
                     htmlMarkerState = htmlMarkerState,
+                    themeState = themeState,
                     onReloadWithBaseUrl = { newBaseUrl ->
                         loadState = MapLoadState.Loading
                         currentBaseUrl = newBaseUrl
@@ -446,6 +465,7 @@ private class MapBridge(
     private val notifyIconImagePlaced: (Int, String) -> Unit,
     private val notifyTextLabelPlaced: (Int, String) -> Unit,
     private val notifyHtmlMarkerStateChanged: (String) -> Unit,
+    private val notifyThemeStateChanged: (String) -> Unit,
 ) {
     @JavascriptInterface
     fun onMapReady() = onReady()
@@ -508,4 +528,7 @@ private class MapBridge(
 
     @JavascriptInterface
     fun onHtmlMarkerStateChanged(stateJson: String) = notifyHtmlMarkerStateChanged(stateJson)
+
+    @JavascriptInterface
+    fun onThemeStateChanged(stateJson: String) = notifyThemeStateChanged(stateJson)
 }

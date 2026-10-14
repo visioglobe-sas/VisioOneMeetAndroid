@@ -134,6 +134,11 @@ enum class Feature(
         titleRes = R.string.feature_html_overlay_marker_title,
         descriptionRes = R.string.feature_html_overlay_marker_description,
     ),
+    CustomTheme(
+        slug = "custom-theme",
+        titleRes = R.string.feature_custom_theme_title,
+        descriptionRes = R.string.feature_custom_theme_description,
+    ),
     ;
 
     companion object {
