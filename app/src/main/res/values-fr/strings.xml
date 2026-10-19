@@ -66,4 +66,12 @@
     <string name="feature_custom_theme_title">Thème personnalisé</string>
     <string name="feature_custom_theme_description">Changez l\'ambiance lumineuse 3D et recolorez les boutons du SDK en direct</string>
     <string name="custom_theme_hint">Touchez un lieu : le bouton « Y aller » de sa fiche utilise les couleurs d\'accent.</string>
+    <string name="feature_accuracy_circle_style_title">Style du cercle de précision</string>
+    <string name="feature_accuracy_circle_style_description">Recolorer le cercle de précision de la position, en direct</string>
+    <string name="accuracy_circle_style_color_label">Couleur</string>
+    <string name="accuracy_circle_style_color_default">Par défaut</string>
+    <string name="accuracy_circle_style_color_red">Rouge</string>
+    <string name="accuracy_circle_style_color_green">Vert</string>
+    <string name="accuracy_circle_style_color_purple">Violet</string>
+    <string name="accuracy_circle_style_opacity_label">Opacité : %1$s</string>
 </resources>

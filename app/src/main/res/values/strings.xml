@@ -67,4 +67,12 @@
     <string name="feature_custom_theme_title">Custom theme</string>
     <string name="feature_custom_theme_description">Switch the 3D lighting theme and recolor the SDK\'s buttons live</string>
     <string name="custom_theme_hint">Tap a place: its card\'s Go button uses the accent colors.</string>
+    <string name="feature_accuracy_circle_style_title">Accuracy circle style</string>
+    <string name="feature_accuracy_circle_style_description">Recolor the tracked position\'s precision circle, live</string>
+    <string name="accuracy_circle_style_color_label">Color</string>
+    <string name="accuracy_circle_style_color_default">Default</string>
+    <string name="accuracy_circle_style_color_red">Red</string>
+    <string name="accuracy_circle_style_color_green">Green</string>
+    <string name="accuracy_circle_style_color_purple">Purple</string>
+    <string name="accuracy_circle_style_opacity_label">Opacity: %1$s</string>
 </resources>

@@ -139,6 +139,11 @@ enum class Feature(
         titleRes = R.string.feature_custom_theme_title,
         descriptionRes = R.string.feature_custom_theme_description,
     ),
+    AccuracyCircleStyle(
+        slug = "accuracy-circle-style",
+        titleRes = R.string.feature_accuracy_circle_style_title,
+        descriptionRes = R.string.feature_accuracy_circle_style_description,
+    ),
     ;
 
     companion object {

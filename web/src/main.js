@@ -60,6 +60,13 @@ let isInsideGeofenceZone = false;
 // See docs/features/geofencing.md.
 const GEOFENCE_ALERT_COLOR = '#E74C3C';
 
+// accuracy-circle-style: the { color, opacity } last applied via
+// setPositionTrackerStyle, re-applied whenever tracking (re)starts because
+// the SDK resets it to its defaults (#0094f0, 0.3) on every stop and offers
+// no getter. null = never set (every other screen). See
+// docs/features/accuracy-circle-style.md.
+let positionTrackerStyle = null;
+
 // The POI/Label pair created at runtime by createDynamicPoi, tracked so
 // updateDynamicPoiLabel/removeDynamicPoi know what to act on. Only one
 // dynamic POI is tracked at a time — a demo-side simplification, not an SDK
@@ -415,8 +422,36 @@ window.MapBridge = {
   // once already true. See docs/features/simulated-position.md.
   injectTrackedPosition(latitude, longitude, precisionCircleRadius) {
     if (!view) return;
+    const wasTracking = view.allowTracking;
     view.allowTracking = true;
+    // accuracy-circle-style: the SDK resets the tracker's color/opacity to
+    // its defaults every time tracking stops, so the chosen style is
+    // re-applied on each false -> true transition, before the first inject
+    // (graphic options are only read at inject time). A no-op on every other
+    // screen (positionTrackerStyle stays null). See
+    // docs/features/accuracy-circle-style.md.
+    if (!wasTracking && positionTrackerStyle) {
+      view.updatePositionTrackerGraphicOptions(positionTrackerStyle);
+    }
     view.injectTrackedPosition({ position: { latitude, longitude }, precisionCircleRadius });
+  },
+  // Recolors the tracked position's precision circle (not the arrow icon at
+  // its center, which the SDK never recolors) via
+  // view.updatePositionTrackerGraphicOptions({ color, opacity }). The SDK
+  // only stores the options: they show up at the next injectTrackedPosition
+  // call (every ~150 ms while the simulation runs, so it looks live). The
+  // style is also kept here, since the SDK has no getter for it and resets
+  // it whenever tracking stops — see injectTrackedPosition above. An invalid
+  // color throws (hex, rgba() or hsl() only); the error is reported as-is.
+  // See docs/features/accuracy-circle-style.md.
+  setPositionTrackerStyle(color, opacity) {
+    if (!view) return;
+    try {
+      view.updatePositionTrackerGraphicOptions({ color, opacity });
+      positionTrackerStyle = { color, opacity };
+    } catch (error) {
+      console.error('updatePositionTrackerGraphicOptions failed', error);
+    }
   },
   // Removes the marker/circle injected above. There is no dedicated stop
   // method on the SDK — setting allowTracking back to false is how it's

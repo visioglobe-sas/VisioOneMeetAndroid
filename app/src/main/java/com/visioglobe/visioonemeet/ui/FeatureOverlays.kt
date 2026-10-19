@@ -317,6 +317,22 @@ private fun WebView.setCameraLockOnPosition(locked: Boolean) {
 }
 
 /**
+ * Recolors the tracked position's precision circle (never the arrow icon at its center) by calling
+ * `window.MapBridge.setPositionTrackerStyle` in the WebView
+ * (`view.updatePositionTrackerGraphicOptions({ color, opacity })` under the hood). Applied at the
+ * next `injectTrackedPosition`; the JS side also re-applies it on every tracking (re)start, since
+ * the SDK resets it whenever tracking stops. See docs/features/accuracy-circle-style.md.
+ */
+private fun WebView.setPositionTrackerStyle(color: String, opacity: Float) {
+    // Rounded to one decimal so 0.1-step slider values reach the SDK as e.g. 0.3, not 0.30000001.
+    val roundedOpacity = (opacity * 10).roundToInt() / 10.0
+    evaluateJavascript(
+        "window.MapBridge.setPositionTrackerStyle(${JSONObject.quote(color)}, $roundedOpacity)",
+        null,
+    )
+}
+
+/**
  * Makes the POI matching [placeId]'s surfaces interactive (or reverts them) by calling
  * `window.MapBridge.setSurfaceInteractive` in the WebView (`venue.updateSurface`'s `isInteractive`
  * flag under the hood). See docs/features/clickable-surface.md.
@@ -1266,6 +1282,9 @@ fun NativeUiReplacementOverlay(webView: WebView?, floorSelector: FloorSelectorSt
  * [onRunningChanged] reports every start/stop transition so a caller can react (e.g. resetting a
  * dependent switch); [extraContent] renders below the Start/Stop button and its error message,
  * nothing for [SimulatedPositionOverlay], the camera-lock switch for [CameraLockOnPositionOverlay].
+ * [initialOriginId]/[initialDestinationId]/[initialRadiusMeters] pre-fill the fields (empty and
+ * [SIMULATED_POSITION_DEFAULT_RADIUS_METERS] unless a caller overrides them, e.g.
+ * [AccuracyCircleStyleOverlay]).
  * See docs/features/simulated-position.md and docs/features/camera-lock-on-position.md.
  */
 @Composable
@@ -1276,10 +1295,13 @@ private fun TrackedPositionSimulationControls(
     startEnabled: Boolean = true,
     onTick: (latitude: Double, longitude: Double) -> Unit = { _, _ -> },
     extraContent: @Composable () -> Unit = {},
+    initialOriginId: String = "",
+    initialDestinationId: String = "",
+    initialRadiusMeters: Float = SIMULATED_POSITION_DEFAULT_RADIUS_METERS,
 ) {
-    var originId by remember { mutableStateOf("") }
-    var destinationId by remember { mutableStateOf("") }
-    var radiusMeters by remember { mutableFloatStateOf(SIMULATED_POSITION_DEFAULT_RADIUS_METERS) }
+    var originId by remember { mutableStateOf(initialOriginId) }
+    var destinationId by remember { mutableStateOf(initialDestinationId) }
+    var radiusMeters by remember { mutableFloatStateOf(initialRadiusMeters) }
     var isRunning by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var activePositions by remember { mutableStateOf<Pair<ResolvedPosition, ResolvedPosition>?>(null) }
@@ -1444,6 +1466,104 @@ fun CameraLockOnPositionOverlay(webView: WebView?, positionsResolved: ResolvedPo
                     },
                 )
             }
+        },
+    )
+}
+
+/**
+ * The `accuracy-circle-style` selection, hoisted by the caller (it outlives the bottom sheet,
+ * which is disposed on every close — the SDK has no getter to read it back from). Defaults match
+ * the SDK's own (`#0094f0`, 0.3). See docs/features/accuracy-circle-style.md.
+ */
+data class PositionTrackerStyle(
+    val color: String = POSITION_TRACKER_DEFAULT_COLOR,
+    val opacity: Float = POSITION_TRACKER_DEFAULT_OPACITY,
+)
+
+/** The SDK's default position tracker color/opacity (reset to these whenever tracking stops). */
+private const val POSITION_TRACKER_DEFAULT_COLOR = "#0094f0"
+private const val POSITION_TRACKER_DEFAULT_OPACITY = 0.3f
+
+/**
+ * Opacity slider bounds. 0.1 rather than 0: the SDK validates opacity with a falsy check, so `0`
+ * would skip validation entirely — see docs/features/accuracy-circle-style.md.
+ */
+private const val POSITION_TRACKER_MIN_OPACITY = 0.1f
+private const val POSITION_TRACKER_MAX_OPACITY = 1f
+
+/** Pre-filled origin/destination, verified to start fine on the shared demo map. */
+private const val ACCURACY_CIRCLE_STYLE_ORIGIN_ID = "B4-UL00-ID0009"
+private const val ACCURACY_CIRCLE_STYLE_DESTINATION_ID = "B4-UL00-ID0010"
+private const val ACCURACY_CIRCLE_STYLE_DEFAULT_RADIUS_METERS = 6f
+
+/** Color presets offered for the tracked position (hex, label resource). */
+private val POSITION_TRACKER_COLOR_PRESETS = listOf(
+    POSITION_TRACKER_DEFAULT_COLOR to R.string.accuracy_circle_style_color_default,
+    "#e53935" to R.string.accuracy_circle_style_color_red,
+    "#43a047" to R.string.accuracy_circle_style_color_green,
+    "#8e24aa" to R.string.accuracy_circle_style_color_purple,
+)
+
+/**
+ * FAB-triggered control for `accuracy-circle-style`: [TrackedPositionSimulationControls] (pre-filled
+ * with two POIs of the demo map and a 6 m radius — a moving tracked position is needed to see its
+ * style; only the circle is recolored, not the center arrow) plus color preset chips and an opacity `Slider` (0.1-1.0, step 0.1). Every change calls
+ * [WebView.setPositionTrackerStyle] immediately, running or not: the SDK applies it at the next
+ * inject (every tick while running), and the JS side re-applies it on each Start since the SDK
+ * resets it on every stop. [style] is hoisted by the caller so it survives the sheet being closed
+ * and reopened. See docs/features/accuracy-circle-style.md.
+ */
+@Composable
+fun AccuracyCircleStyleOverlay(
+    webView: WebView?,
+    positionsResolved: ResolvedPositionsPair?,
+    style: PositionTrackerStyle,
+    onStyleChange: (PositionTrackerStyle) -> Unit,
+) {
+    val applyStyle = { newStyle: PositionTrackerStyle ->
+        onStyleChange(newStyle)
+        webView?.setPositionTrackerStyle(newStyle.color, newStyle.opacity)
+    }
+
+    TrackedPositionSimulationControls(
+        webView = webView,
+        positionsResolved = positionsResolved,
+        initialOriginId = ACCURACY_CIRCLE_STYLE_ORIGIN_ID,
+        initialDestinationId = ACCURACY_CIRCLE_STYLE_DESTINATION_ID,
+        initialRadiusMeters = ACCURACY_CIRCLE_STYLE_DEFAULT_RADIUS_METERS,
+        extraContent = {
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                text = stringResource(R.string.accuracy_circle_style_color_label),
+                style = MaterialTheme.typography.labelLarge,
+            )
+            FlowRow(modifier = Modifier.fillMaxWidth()) {
+                POSITION_TRACKER_COLOR_PRESETS.forEach { (hex, labelRes) ->
+                    ThemeColorChip(
+                        hex = hex,
+                        name = stringResource(labelRes),
+                        selected = hex.equals(style.color, ignoreCase = true),
+                        onClick = { applyStyle(style.copy(color = hex)) },
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = stringResource(
+                    R.string.accuracy_circle_style_opacity_label,
+                    "%.1f".format(java.util.Locale.ROOT, style.opacity),
+                ),
+            )
+            Slider(
+                value = style.opacity,
+                onValueChange = { value ->
+                    val rounded = (value * 10).roundToInt() / 10f
+                    if (rounded != style.opacity) applyStyle(style.copy(opacity = rounded))
+                },
+                valueRange = POSITION_TRACKER_MIN_OPACITY..POSITION_TRACKER_MAX_OPACITY,
+                // 0.1..1.0 in 0.1 steps = 8 intermediate stops.
+                steps = 8,
+            )
         },
     )
 }
