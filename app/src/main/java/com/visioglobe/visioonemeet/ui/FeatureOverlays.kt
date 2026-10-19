@@ -1532,38 +1532,46 @@ fun AccuracyCircleStyleOverlay(
         initialDestinationId = ACCURACY_CIRCLE_STYLE_DESTINATION_ID,
         initialRadiusMeters = ACCURACY_CIRCLE_STYLE_DEFAULT_RADIUS_METERS,
         extraContent = {
-            Spacer(modifier = Modifier.height(12.dp))
-            Text(
-                text = stringResource(R.string.accuracy_circle_style_color_label),
-                style = MaterialTheme.typography.labelLarge,
-            )
-            FlowRow(modifier = Modifier.fillMaxWidth()) {
-                POSITION_TRACKER_COLOR_PRESETS.forEach { (hex, labelRes) ->
-                    ThemeColorChip(
-                        hex = hex,
-                        name = stringResource(labelRes),
-                        selected = hex.equals(style.color, ignoreCase = true),
-                        onClick = { applyStyle(style.copy(color = hex)) },
-                    )
+            // Kept compact on purpose: the camera follows the tracked position (centered in the
+            // map), and closing the sheet stops the simulation, so the sheet must stay short
+            // enough for the precision circle to remain visible above it.
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = stringResource(R.string.accuracy_circle_style_color_label),
+                    style = MaterialTheme.typography.labelLarge,
+                    modifier = Modifier.padding(end = 8.dp),
+                )
+                FlowRow(modifier = Modifier.weight(1f)) {
+                    POSITION_TRACKER_COLOR_PRESETS.forEach { (hex, labelRes) ->
+                        ThemeColorChip(
+                            hex = hex,
+                            name = stringResource(labelRes),
+                            selected = hex.equals(style.color, ignoreCase = true),
+                            onClick = { applyStyle(style.copy(color = hex)) },
+                        )
+                    }
                 }
             }
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = stringResource(
-                    R.string.accuracy_circle_style_opacity_label,
-                    "%.1f".format(java.util.Locale.ROOT, style.opacity),
-                ),
-            )
-            Slider(
-                value = style.opacity,
-                onValueChange = { value ->
-                    val rounded = (value * 10).roundToInt() / 10f
-                    if (rounded != style.opacity) applyStyle(style.copy(opacity = rounded))
-                },
-                valueRange = POSITION_TRACKER_MIN_OPACITY..POSITION_TRACKER_MAX_OPACITY,
-                // 0.1..1.0 in 0.1 steps = 8 intermediate stops.
-                steps = 8,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = stringResource(
+                        R.string.accuracy_circle_style_opacity_label,
+                        "%.1f".format(java.util.Locale.ROOT, style.opacity),
+                    ),
+                    modifier = Modifier.padding(end = 8.dp),
+                )
+                Slider(
+                    value = style.opacity,
+                    onValueChange = { value ->
+                        val rounded = (value * 10).roundToInt() / 10f
+                        if (rounded != style.opacity) applyStyle(style.copy(opacity = rounded))
+                    },
+                    valueRange = POSITION_TRACKER_MIN_OPACITY..POSITION_TRACKER_MAX_OPACITY,
+                    // 0.1..1.0 in 0.1 steps = 8 intermediate stops.
+                    steps = 8,
+                    modifier = Modifier.weight(1f),
+                )
+            }
         },
     )
 }
