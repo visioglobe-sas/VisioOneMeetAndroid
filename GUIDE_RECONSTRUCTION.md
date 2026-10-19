@@ -2,7 +2,7 @@
 
 Une application Android (Kotlin + Jetpack Compose) qui affiche un plan intérieur VisioOne dans une WebView, en pontant un bundle web Vite avec la couche native via `WebViewAssetLoader`.
 
-**Stack :** Kotlin 2.2.20 · Jetpack Compose · AGP 9.3.0 · Gradle 9.6.1 · Vite 5 · `@visioglobe/visioone` 1.0.9
+**Stack :** Kotlin 2.2.20 · Jetpack Compose · AGP 9.3.0 · Gradle 9.6.1 · Vite 5 · `@visioglobe/visioone` 1.1.0
 
 ## Sommaire
 
@@ -284,7 +284,7 @@ C'est un projet Vite indépendant, séparé du projet Gradle, dont la seule miss
     "build": "vite build"
   },
   "dependencies": {
-    "@visioglobe/visioone": "1.0.9"
+    "@visioglobe/visioone": "1.1.0"
   },
   "devDependencies": {
     "vite": "^5.4.0"
