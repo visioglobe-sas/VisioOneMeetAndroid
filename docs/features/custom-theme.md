@@ -4,12 +4,12 @@
 
 White-label styling of the map, live, without reloading anything:
 
-- **3D scene theme** — `view.themes` lists the lighting themes the SDK ships (`['day', 'night', 'goldenHour']` in `@visioglobe/visioone` 1.0.9) and `view.setTheme(name)` applies one. A theme only changes the scene's lights (directional + ambient light color/position, and a material tint): `night` gives a bluish, darker scene, `goldenHour` a warm, muted one. It never touches the SDK's UI.
+- **3D scene theme** — `view.themes` lists the lighting themes the SDK ships (`['day', 'night', 'goldenHour']` in `@visioglobe/visioone` 1.0.9 and 1.1.0) and `view.setTheme(name)` applies one. A theme only changes the scene's lights (directional + ambient light color/position, and a material tint): `night` gives a bluish, darker scene, `goldenHour` a warm, muted one. It never touches the SDK's UI.
 - **UI accent colors** — `view.accentColor` and `view.textAccentColor` are settable properties that recolor the SDK's own UI buttons (the POI card's "Go" button, "Add a step", "Remove step"…): background and text respectively.
 
 The view must be created with `enableShadows: true` for themes to have any visible effect — see "Things to know".
 
-The SDK 1.0.9 public API has no option to change the UI font.
+The SDK public API (as of 1.1.0) has no option to change the UI font.
 
 ## SDK usage
 
@@ -145,7 +145,7 @@ The SDK API exercised:
 
 - **`setTheme` has no visible effect unless the view was created with `enableShadows: true`.** Themes only change the scene lights, which are only rendered with shadows/lights enabled: without the option, switching themes renders pixel-identical frames (even at `quality: 'high'`). `enableShadows` is a creation-time option — it cannot be turned on for an existing view — and the SDK documents shadows as "computationally expensive", so enable it only where you actually use themes and check performance on your low-end target devices.
 - **`setTheme` with an unknown id throws** `Cannot apply given theme <id> as it isn't registered.` Only pass ids read from `view.themes`.
-- **There is no getter for the current theme** in 1.0.9 — track it yourself. A view always starts on `day`.
+- **There is no getter for the current theme** (as of 1.1.0) — track it yourself. A view always starts on `day`.
 - **Coming back to `day` doesn't exactly restore the initial lighting.** With `enableShadows: true`, the scene right after load and the scene after switching to another theme and back to `day` are not pixel-identical (the second is slightly darker); it's the same result whichever theme you came from. Calling `setTheme('day')` on a fresh view is a no-op. Only a view re-creation gets the exact initial look back.
 - **Accent colors apply live to the SDK's UI** — no re-render or reload needed, even while a POI card is open. They do **not** change the color of a selected surface on the map: that's a separate property, `view.surfaceSelectionColor`.
 - **An invalid color throws** `Invalid color format provided, it should be hex color, rgba color or hsl color.` and leaves the previous value in place.
