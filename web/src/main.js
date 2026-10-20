@@ -2,7 +2,7 @@ import { createVisioOne } from '@visioglobe/visioone';
 
 // The Android app appends ?vg_maphash=<mapHash> when it loads this page (see
 // FeatureMapScreen.kt), so the same bundle can display any map without a rebuild.
-// `vg_maphash` is also the page-URL parameter the SDK (>= 1.0.9) itself reads to
+// `vg_maphash` is also the page-URL parameter the SDK (>= 1.0.6) itself reads to
 // override `LoadOptions.vg_maphash`, so both always agree.
 const DEFAULT_HASH = 'kbae8e6c066cca4b02c2afac2bc963a643d87437a';
 const hash = new URLSearchParams(window.location.search).get('vg_maphash') || DEFAULT_HASH;
