@@ -21,7 +21,7 @@ resolvePositions(requestId, originId, destinationId) {
 },
 injectTrackedPosition(latitude, longitude, precisionCircleRadius) {
   if (!view) return;
-  view.allowTracking = true;
+  if (!view.allowTracking) view.allowTracking = true;
   view.injectTrackedPosition({ position: { latitude, longitude }, precisionCircleRadius });
 },
 stopTrackedPosition() {
@@ -46,6 +46,7 @@ private fun WebView.stopTrackedPosition() {
 ## Things to know
 
 - `injectTrackedPosition` requires `view.allowTracking = true` beforehand — calling it while `allowTracking` is still `false` throws on the SDK side.
+- Set `allowTracking = true` only once, when tracking starts — not before every `injectTrackedPosition`. Setting it to `true` always turns the camera lock (`lockCameraPositionOnTracking`) back on, so doing it on every position update re-locks the camera each time, undoing a lock the user turned off or a pan. See `camera-lock-on-position.md`.
 - There's no dedicated "stop" method: setting `view.allowTracking = false` is the documented way to make the tracked point and its accuracy circle disappear. There's no `view.removeTrackedPosition()` equivalent.
 - A POI has no direct latitude/longitude field. Position comes from the first available marker/label/image on it: `poi.markers?.[0]?.position ?? poi.labels?.[0]?.position ?? poi.images?.[0]?.position`. All three carry a `Position` (`{ latitude, longitude, altitude? }`) in the same shape `injectTrackedPosition` expects, so no conversion is needed. A POI with none of the three, or an unknown id, resolves to `null`.
 - `resolvePositions` is asynchronous: it returns nothing directly, and the result comes back later via `onPositionsResolved`. Echo a request id so the caller can match a response to the request that produced it, in case a second request could overlap with the first before it resolves.
@@ -55,4 +56,4 @@ private fun WebView.stopTrackedPosition() {
 
 - `view.updatePositionTrackerGraphicOptions({ color, opacity })` customizes the tracked point/circle's appearance.
 - `injectTrackedPosition` accepts a second `AnimationOptions` argument, omitted here — without it, each new point is an instant jump rather than an animated transition.
-- `view.lockCameraOrientationOnTracking` / `view.lockCameraPositionOnTracking` (booleans, only effective while `allowTracking = true`) can make the camera follow the tracked point — see `camera-lock-on-position.md`.
+- `view.lockCameraOrientationOnTracking` / `view.lockCameraPositionOnTracking` (booleans, only effective while `allowTracking = true`, and turned on by `allowTracking = true` itself) make the camera follow the tracked point — see `camera-lock-on-position.md`.

@@ -417,13 +417,15 @@ window.MapBridge = {
   },
   // Injects/updates the simulated tracked position and its accuracy circle
   // (precisionCircleRadius, in meters) via view.injectTrackedPosition.
-  // allowTracking must be true first — the SDK throws otherwise — so it's
-  // set here on every call rather than once at Start, which costs nothing
-  // once already true. See docs/features/simulated-position.md.
+  // allowTracking must be true first — the SDK throws otherwise — but it's
+  // only set on the false -> true transition: setting it to true always
+  // forces lockCameraPositionOnTracking back to true, so re-setting it on
+  // every ~150 ms tick would re-lock the camera each time (undoing a lock
+  // turned off by the user or by a pan). See docs/features/simulated-position.md.
   injectTrackedPosition(latitude, longitude, precisionCircleRadius) {
     if (!view) return;
     const wasTracking = view.allowTracking;
-    view.allowTracking = true;
+    if (!wasTracking) view.allowTracking = true;
     // accuracy-circle-style: the SDK resets the tracker's color/opacity to
     // its defaults every time tracking stops, so the chosen style is
     // re-applied on each false -> true transition, before the first inject
@@ -464,7 +466,9 @@ window.MapBridge = {
   // GPS-app "recenter on me" style, via view.lockCameraPositionOnTracking.
   // Has no visible effect until a position has been injected (allowTracking
   // must be true — see injectTrackedPosition above), same precondition the
-  // SDK documents on the flag itself. See docs/features/camera-lock-on-position.md.
+  // SDK documents on the flag itself. The resulting state is reported back
+  // via onCameraLockChanged (see onTrackingStateChanged below), not here.
+  // See docs/features/camera-lock-on-position.md.
   setCameraLockOnPosition(locked) {
     if (!view) return;
     view.lockCameraPositionOnTracking = locked;
@@ -1090,6 +1094,18 @@ function onExploreModeChanged(event) {
   bridge?.onExploreModeChanged(event.currentExploreMode);
 }
 
+// Forwards the SDK's camera-lock state to native as a bare boolean, so the
+// camera-lock switch mirrors the SDK instead of keeping its own value. The
+// lock changes on its own: allowTracking = true turns it on ('trackingon'),
+// allowTracking = false turns it off ('trackingoff'), and a user pan while
+// locked turns it off ('trackingchanged', also fired by setting
+// lockCameraPositionOnTracking). None of these events carries the value, so
+// it's read from the view. See docs/features/camera-lock-on-position.md.
+function onTrackingStateChanged() {
+  if (!view) return;
+  bridge?.onCameraLockChanged(view.lockCameraPositionOnTracking);
+}
+
 // Web -> Native bridge: forwards the SDK's 'poiclick' event to the native side,
 // so a screen can react to the user tapping a POI on the map (see
 // docs/features/poi-click.md). The payload is a JSON-encoded array (usually a
@@ -1114,6 +1130,9 @@ async function main() {
     view.addEventListener('poiclick', onPoiClick);
     view.addEventListener('currentfloorchanged', onCurrentFloorChanged);
     view.addEventListener('exploremodechanged', onExploreModeChanged);
+    view.addEventListener('trackingon', onTrackingStateChanged);
+    view.addEventListener('trackingoff', onTrackingStateChanged);
+    view.addEventListener('trackingchanged', onTrackingStateChanged);
     // Only the first building's floors are exposed today — see
     // docs/features/floor-selector.md, "Points d'attention" for why a
     // building switcher is out of scope for this demo.

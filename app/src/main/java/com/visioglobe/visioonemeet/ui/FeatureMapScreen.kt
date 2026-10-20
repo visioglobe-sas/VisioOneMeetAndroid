@@ -83,6 +83,7 @@ data class FeatureBridgeState(
     val textLabelPlaced: TextLabelPlacementResult? = null,
     val htmlMarkerState: HtmlMarkerState? = null,
     val themeState: ThemeState? = null,
+    val isCameraLocked: Boolean = false,
     val onReloadWithBaseUrl: (String) -> Unit = {},
 )
 
@@ -170,6 +171,13 @@ data class FeatureBridgeState(
  * pushed once unprompted right after the map loads so the control has a correct initial highlight.
  * Surfaced via [FeatureBridgeState.currentExploreMode]. See docs/features/explore-mode.md.
  *
+ * `view.lockCameraPositionOnTracking` (`camera-lock-on-position`) is likewise mirrored rather than
+ * kept app-side: the SDK turns it on by itself when tracking starts, off when it stops or when the
+ * user pans the map, so the web bundle forwards every `trackingon`/`trackingoff`/`trackingchanged`
+ * event via `AndroidBridge.onCameraLockChanged`, surfaced via [FeatureBridgeState.isCameraLocked]
+ * — kept here, outside the bottom sheet, so a change made while the sheet is closed isn't lost.
+ * See docs/features/camera-lock-on-position.md.
+ *
  * [FeatureBridgeState.currentBaseUrl]/[FeatureBridgeState.onReloadWithBaseUrl] back `custom-base-url`:
  * unlike every other bridge call, `LoadOptions.baseURL` cannot be changed on an already-loaded venue
  * — it only takes effect when `loadVenue` runs, so "Reload" here means fully recreating the WebView
@@ -222,6 +230,7 @@ fun FeatureMapScreen(
     var textLabelPlaced by remember { mutableStateOf<TextLabelPlacementResult?>(null) }
     var htmlMarkerState by remember { mutableStateOf<HtmlMarkerState?>(null) }
     var themeState by remember { mutableStateOf<ThemeState?>(null) }
+    var isCameraLocked by remember { mutableStateOf(false) }
     val sheetState = rememberModalBottomSheetState()
 
     Scaffold(
@@ -370,6 +379,9 @@ fun FeatureMapScreen(
                                     notifyThemeStateChanged = { stateJson ->
                                         mainHandler.post { themeState = parseThemeStatePayload(stateJson) }
                                     },
+                                    notifyCameraLockChanged = { locked ->
+                                        mainHandler.post { isCameraLocked = locked }
+                                    },
                                 ),
                                 "AndroidBridge",
                             )
@@ -435,6 +447,7 @@ fun FeatureMapScreen(
                     textLabelPlaced = textLabelPlaced,
                     htmlMarkerState = htmlMarkerState,
                     themeState = themeState,
+                    isCameraLocked = isCameraLocked,
                     onReloadWithBaseUrl = { newBaseUrl ->
                         loadState = MapLoadState.Loading
                         currentBaseUrl = newBaseUrl
@@ -466,6 +479,7 @@ private class MapBridge(
     private val notifyTextLabelPlaced: (Int, String) -> Unit,
     private val notifyHtmlMarkerStateChanged: (String) -> Unit,
     private val notifyThemeStateChanged: (String) -> Unit,
+    private val notifyCameraLockChanged: (Boolean) -> Unit,
 ) {
     @JavascriptInterface
     fun onMapReady() = onReady()
@@ -531,4 +545,7 @@ private class MapBridge(
 
     @JavascriptInterface
     fun onThemeStateChanged(stateJson: String) = notifyThemeStateChanged(stateJson)
+
+    @JavascriptInterface
+    fun onCameraLockChanged(locked: Boolean) = notifyCameraLockChanged(locked)
 }

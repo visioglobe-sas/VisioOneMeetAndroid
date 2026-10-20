@@ -107,7 +107,11 @@ class MainActivity : ComponentActivity() {
                                     Feature.SimulatedPosition ->
                                         SimulatedPositionOverlay(webView, bridgeState.positionsResolved)
                                     Feature.CameraLockOnPosition ->
-                                        CameraLockOnPositionOverlay(webView, bridgeState.positionsResolved)
+                                        CameraLockOnPositionOverlay(
+                                            webView,
+                                            bridgeState.positionsResolved,
+                                            bridgeState.isCameraLocked,
+                                        )
                                     Feature.ClickableSurface -> ClickableSurfaceOverlay(webView)
                                     Feature.CustomData -> CustomDataOverlay(webView, bridgeState.customDataLoaded)
                                     Feature.CategoryHighlight ->

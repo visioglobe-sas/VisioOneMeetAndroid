@@ -23,7 +23,7 @@ setPositionTrackerStyle(color, opacity) {
 injectTrackedPosition(latitude, longitude, precisionCircleRadius) {
   if (!view) return;
   const wasTracking = view.allowTracking;
-  view.allowTracking = true;
+  if (!wasTracking) view.allowTracking = true;
   // Re-apply the chosen style on every (re)start, before the first inject.
   if (!wasTracking && positionTrackerStyle) {
     view.updatePositionTrackerGraphicOptions(positionTrackerStyle);
