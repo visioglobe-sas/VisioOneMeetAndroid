@@ -70,6 +70,7 @@ Each feature below is a self-contained screen in the app demonstrating one Visio
 - [Custom Text Label](docs/features/custom-text-label.md) — place your own free text on the map via `venue.createLabel()`, restyling it live via `venue.updateLabel()` and removing it via `venue.removeLabel()`.
 - [HTML Overlay Marker](docs/features/html-overlay-marker.md) — pin a tappable HTML badge on the map, never hidden by 3D geometry, via `venue.createMarker()`, toggling it via `venue.updateMarker()` and removing it via `venue.removeMarker()`; taps are forwarded to native over the bridge.
 - [Custom Theme](docs/features/custom-theme.md) — switch the 3D scene's lighting theme via `view.setTheme()` (built from `view.themes`, view created with `enableShadows: true`) and recolor the SDK's own UI buttons live via `view.accentColor`/`view.textAccentColor`.
+- [Accuracy Circle Style](docs/features/accuracy-circle-style.md) — recolor the tracked position's precision circle live via `view.updatePositionTrackerGraphicOptions()`, with the circle's radius set per `view.injectTrackedPosition()` call.
 
 ## How it works
 

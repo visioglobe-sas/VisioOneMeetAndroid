@@ -4,12 +4,17 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.visioglobe.visioonemeet.model.Feature
 import com.visioglobe.visioonemeet.ui.AccessibleModeOverlay
+import com.visioglobe.visioonemeet.ui.AccuracyCircleStyleOverlay
 import com.visioglobe.visioonemeet.ui.AddLocaleOverlay
 import com.visioglobe.visioonemeet.ui.CameraLockOnPositionOverlay
 import com.visioglobe.visioonemeet.ui.CategoryHighlightOverlay
@@ -32,6 +37,7 @@ import com.visioglobe.visioonemeet.ui.IconMarker3dOverlay
 import com.visioglobe.visioonemeet.ui.NativeUiReplacementOverlay
 import com.visioglobe.visioonemeet.ui.NavigationExcludeModalitiesOverlay
 import com.visioglobe.visioonemeet.ui.OccupancySimulationOverlay
+import com.visioglobe.visioonemeet.ui.PositionTrackerStyle
 import com.visioglobe.visioonemeet.ui.PoiClickOverlay
 import com.visioglobe.visioonemeet.ui.ResetViewOverlay
 import com.visioglobe.visioonemeet.ui.RuntimeLocaleOverlay
@@ -65,6 +71,10 @@ class MainActivity : ComponentActivity() {
                     }
                     composable("feature/{slug}") { backStackEntry ->
                         val feature = Feature.fromSlug(backStackEntry.arguments?.getString("slug"))
+                        // accuracy-circle-style: hoisted here (not inside the bottom sheet, which is
+                        // disposed on every close) so the selection survives a close/reopen — the
+                        // SDK has no getter for it. See docs/features/accuracy-circle-style.md.
+                        var positionTrackerStyle by remember { mutableStateOf(PositionTrackerStyle()) }
                         FeatureMapScreen(
                             mapHash = if (feature == Feature.CustomData) CUSTOM_DATA_MAP_HASH else DEFAULT_MAP_HASH,
                             titleRes = feature?.titleRes,
@@ -132,6 +142,12 @@ class MainActivity : ComponentActivity() {
                                     Feature.HtmlOverlayMarker ->
                                         HtmlOverlayMarkerOverlay(webView, bridgeState.htmlMarkerState)
                                     Feature.CustomTheme -> CustomThemeOverlay(webView, bridgeState.themeState)
+                                    Feature.AccuracyCircleStyle -> AccuracyCircleStyleOverlay(
+                                        webView,
+                                        bridgeState.positionsResolved,
+                                        positionTrackerStyle,
+                                        onStyleChange = { positionTrackerStyle = it },
+                                    )
                                     null -> Unit
                                 }
                             },
