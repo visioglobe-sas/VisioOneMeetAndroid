@@ -290,7 +290,8 @@ private fun WebView.resolvePositions(requestId: Int, originId: String, destinati
 /**
  * Injects/updates the simulated tracked position and its accuracy circle by calling
  * `window.MapBridge.injectTrackedPosition` in the WebView (`view.injectTrackedPosition` under the
- * hood, after setting `view.allowTracking = true`). [precisionCircleRadiusMeters] is the accuracy
+ * hood, after setting `view.allowTracking = true` on the first call only — re-setting it re-locks
+ * the camera). [precisionCircleRadiusMeters] is the accuracy
  * circle's radius, in meters. See docs/features/simulated-position.md.
  */
 private fun WebView.injectTrackedPosition(latitude: Double, longitude: Double, precisionCircleRadiusMeters: Double) {
@@ -1279,7 +1280,7 @@ fun NativeUiReplacementOverlay(webView: WebView?, floorSelector: FloorSelectorSt
  * radius on the *next* tick with no restart needed. Stop (or leaving the screen, which cancels
  * this effect and tears down the WebView) calls [WebView.stopTrackedPosition] via the effect's
  * `finally` block, same cleanup-on-cancellation idiom as [OccupancySimulationOverlay].
- * [onRunningChanged] reports every start/stop transition so a caller can react (e.g. resetting a
+ * [onRunningChanged] reports every start/stop transition so a caller can react (e.g. enabling a
  * dependent switch); [extraContent] renders below the Start/Stop button and its error message,
  * nothing for [SimulatedPositionOverlay], the camera-lock switch for [CameraLockOnPositionOverlay].
  * [initialOriginId]/[initialDestinationId]/[initialRadiusMeters] pre-fill the fields (empty and
@@ -1431,25 +1432,24 @@ fun SimulatedPositionOverlay(webView: WebView?, positionsResolved: ResolvedPosit
  * moving position is needed to demonstrate a camera lock on it) plus a "Recenter on me" `Switch`
  * that flips `view.lockCameraPositionOnTracking` via [WebView.setCameraLockOnPosition] — the
  * GPS-app-style behavior this feature demonstrates. The switch is disabled while no simulation is
- * running (nothing to lock onto) and is reset to off whenever the simulation stops, so restarting
- * always begins unlocked — a fresh, deliberate opt-in each time, same pattern as radiusMeters not
- * needing a restart to apply. See docs/features/camera-lock-on-position.md.
+ * running (nothing to lock onto). It never holds its own value: [isCameraLocked] mirrors the SDK's
+ * flag, pushed back on every `trackingon`/`trackingoff`/`trackingchanged` event (see
+ * [FeatureBridgeState.isCameraLocked]) — so it shows on right after Start (the SDK locks by itself
+ * when tracking starts), off after Stop, and off when the visitor pans the map while locked.
+ * See docs/features/camera-lock-on-position.md.
  */
 @Composable
-fun CameraLockOnPositionOverlay(webView: WebView?, positionsResolved: ResolvedPositionsPair?) {
+fun CameraLockOnPositionOverlay(
+    webView: WebView?,
+    positionsResolved: ResolvedPositionsPair?,
+    isCameraLocked: Boolean,
+) {
     var isRunning by remember { mutableStateOf(false) }
-    var isLocked by remember { mutableStateOf(false) }
 
     TrackedPositionSimulationControls(
         webView = webView,
         positionsResolved = positionsResolved,
-        onRunningChanged = { running ->
-            isRunning = running
-            if (!running && isLocked) {
-                isLocked = false
-                webView?.setCameraLockOnPosition(false)
-            }
-        },
+        onRunningChanged = { running -> isRunning = running },
         extraContent = {
             Spacer(modifier = Modifier.height(8.dp))
             Row(
@@ -1458,12 +1458,9 @@ fun CameraLockOnPositionOverlay(webView: WebView?, positionsResolved: ResolvedPo
             ) {
                 Text(text = "Recenter camera on position", modifier = Modifier.weight(1f))
                 Switch(
-                    checked = isLocked,
+                    checked = isCameraLocked,
                     enabled = isRunning,
-                    onCheckedChange = { locked ->
-                        isLocked = locked
-                        webView?.setCameraLockOnPosition(locked)
-                    },
+                    onCheckedChange = { locked -> webView?.setCameraLockOnPosition(locked) },
                 )
             }
         },
@@ -2160,8 +2157,8 @@ fun AddLocaleOverlay(webView: WebView?, addLocaleResolved: AddLocaleResult?) {
  * zone" text — the JS side itself also recolors the zone's surface(s) as a visual alert on a state
  * transition, this overlay never touches `venue.updateSurface` directly. Stopping the simulation
  * calls [WebView.clearZone] to revert that color and forget the zone, so restarting always begins
- * from a clean, unresolved zone — same "fresh opt-in each time" idiom as
- * CameraLockOnPositionOverlay's lock switch. See docs/features/geofencing.md.
+ * from a clean, unresolved zone — a "fresh opt-in each time" idiom.
+ * See docs/features/geofencing.md.
  */
 @Composable
 fun GeofencingOverlay(
