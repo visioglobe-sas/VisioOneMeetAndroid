@@ -144,6 +144,11 @@ enum class Feature(
         titleRes = R.string.feature_accuracy_circle_style_title,
         descriptionRes = R.string.feature_accuracy_circle_style_description,
     ),
+    CameraProjectionToggle(
+        slug = "camera-projection-toggle",
+        titleRes = R.string.feature_camera_projection_toggle_title,
+        descriptionRes = R.string.feature_camera_projection_toggle_description,
+    ),
     ;
 
     companion object {

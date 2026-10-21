@@ -17,6 +17,7 @@ import com.visioglobe.visioonemeet.ui.AccessibleModeOverlay
 import com.visioglobe.visioonemeet.ui.AccuracyCircleStyleOverlay
 import com.visioglobe.visioonemeet.ui.AddLocaleOverlay
 import com.visioglobe.visioonemeet.ui.CameraLockOnPositionOverlay
+import com.visioglobe.visioonemeet.ui.CameraProjectionToggleOverlay
 import com.visioglobe.visioonemeet.ui.CategoryHighlightOverlay
 import com.visioglobe.visioonemeet.ui.ClickableSurfaceOverlay
 import com.visioglobe.visioonemeet.ui.ComputeNavigationOverlay
@@ -186,6 +187,11 @@ class MainActivity : ComponentActivity() {
                                         webView,
                                         positionTrackerStyle,
                                         onStyleChange = { positionTrackerStyle = it },
+                                    )
+                                    Feature.CameraProjectionToggle -> CameraProjectionToggleOverlay(
+                                        bridgeState.cameraProjection,
+                                        bridgeState.isMapReady,
+                                        bridgeState.onReloadWithCameraProjection,
                                     )
                                     null -> Unit
                                 }

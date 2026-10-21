@@ -3145,3 +3145,46 @@ fun CustomThemeOverlay(webView: WebView?, themeState: ThemeState?) {
         }
     }
 }
+
+/** The SDK's two `cameraProjection` values, paired with their localized label. */
+private val CAMERA_PROJECTION_OPTIONS = listOf(
+    "perspective" to R.string.camera_projection_option_perspective,
+    "orthographic" to R.string.camera_projection_option_orthographic,
+)
+
+/**
+ * FAB-triggered control for `camera-projection-toggle`: a two-option segmented control whose
+ * selection is [currentProjection] — the value `view.cameraProjection` reported once the view was
+ * created, not what was requested — and a one-line hint. Selecting the other option calls
+ * [onSelectProjection], which recreates the whole map (fresh `loadVenue` + `createView` with the
+ * new `cameraProjection`), since the SDK only takes the projection at view creation. Disabled while
+ * that reload is in flight ([isMapReady] false, [currentProjection] null). See
+ * docs/features/camera-projection-toggle.md.
+ */
+@Composable
+fun CameraProjectionToggleOverlay(
+    currentProjection: String?,
+    isMapReady: Boolean,
+    onSelectProjection: (String) -> Unit,
+) {
+    val enabled = isMapReady && currentProjection != null
+    Column(modifier = Modifier.padding(16.dp)) {
+        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+            CAMERA_PROJECTION_OPTIONS.forEachIndexed { index, (projection, labelRes) ->
+                SegmentedButton(
+                    selected = projection == currentProjection,
+                    onClick = { if (projection != currentProjection) onSelectProjection(projection) },
+                    enabled = enabled,
+                    shape = SegmentedButtonDefaults.itemShape(index = index, count = CAMERA_PROJECTION_OPTIONS.size),
+                ) {
+                    Text(stringResource(labelRes))
+                }
+            }
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = stringResource(R.string.camera_projection_hint),
+            style = MaterialTheme.typography.bodySmall,
+        )
+    }
+}
