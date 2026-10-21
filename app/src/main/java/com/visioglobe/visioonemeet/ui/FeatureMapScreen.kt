@@ -196,6 +196,12 @@ data class FeatureBridgeState(
  * sheet. `native-ui-replacement` is the only user of it today: it hides the SDK's own default
  * floor-selector widget as soon as the map loads, rather than only once the sheet's toggle is
  * touched, see docs/features/native-ui-replacement.md.
+ *
+ * [screenContent] is composed for the whole lifetime of the screen, outside the bottom sheet, with
+ * the same arguments as [sheetContent]. It renders nothing visible: it hosts work that must outlive
+ * the sheet, which is disposed on every close — today the tracked-position simulation loop of the
+ * four tracking screens (see `TrackedPositionSimulationHost`), so the simulation keeps running
+ * while the sheet is closed and the visitor pans the map, and stops when the screen is left.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -207,6 +213,7 @@ fun FeatureMapScreen(
     enableShadows: Boolean = false,
     onMapReady: (WebView) -> Unit = {},
     onBack: () -> Unit,
+    screenContent: @Composable (webView: WebView?, bridgeState: FeatureBridgeState) -> Unit = { _, _ -> },
     sheetContent: @Composable (webView: WebView?, bridgeState: FeatureBridgeState) -> Unit,
 ) {
     var loadState by remember { mutableStateOf<MapLoadState>(MapLoadState.Loading) }
@@ -421,39 +428,40 @@ fun FeatureMapScreen(
         }
     }
 
+    val bridgeState = FeatureBridgeState(
+        lastPoiClick = lastPoiClick,
+        floorSelector = floorSelector,
+        navigationError = navigationError,
+        positionsResolved = positionsResolved,
+        customDataLoaded = customDataLoaded,
+        categoriesLoaded = categoriesLoaded,
+        dynamicPoiCreated = dynamicPoiCreated,
+        localeResolved = localeResolved,
+        currentExploreMode = currentExploreMode,
+        addLocaleResolved = addLocaleResolved,
+        zoneResolved = zoneResolved,
+        isInsideGeofenceZone = isInsideGeofenceZone,
+        currentBaseUrl = currentBaseUrl,
+        iconImagePlaced = iconImagePlaced,
+        textLabelPlaced = textLabelPlaced,
+        htmlMarkerState = htmlMarkerState,
+        themeState = themeState,
+        isCameraLocked = isCameraLocked,
+        onReloadWithBaseUrl = { newBaseUrl ->
+            loadState = MapLoadState.Loading
+            currentBaseUrl = newBaseUrl
+        },
+    )
+
+    screenContent(webView, bridgeState)
+
     if (showControls) {
         ModalBottomSheet(
             onDismissRequest = { showControls = false },
             sheetState = sheetState,
             containerColor = MaterialTheme.colorScheme.surface,
         ) {
-            sheetContent(
-                webView,
-                FeatureBridgeState(
-                    lastPoiClick = lastPoiClick,
-                    floorSelector = floorSelector,
-                    navigationError = navigationError,
-                    positionsResolved = positionsResolved,
-                    customDataLoaded = customDataLoaded,
-                    categoriesLoaded = categoriesLoaded,
-                    dynamicPoiCreated = dynamicPoiCreated,
-                    localeResolved = localeResolved,
-                    currentExploreMode = currentExploreMode,
-                    addLocaleResolved = addLocaleResolved,
-                    zoneResolved = zoneResolved,
-                    isInsideGeofenceZone = isInsideGeofenceZone,
-                    currentBaseUrl = currentBaseUrl,
-                    iconImagePlaced = iconImagePlaced,
-                    textLabelPlaced = textLabelPlaced,
-                    htmlMarkerState = htmlMarkerState,
-                    themeState = themeState,
-                    isCameraLocked = isCameraLocked,
-                    onReloadWithBaseUrl = { newBaseUrl ->
-                        loadState = MapLoadState.Loading
-                        currentBaseUrl = newBaseUrl
-                    },
-                ),
-            )
+            sheetContent(webView, bridgeState)
         }
     }
 }

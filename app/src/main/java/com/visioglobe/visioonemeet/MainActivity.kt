@@ -31,6 +31,8 @@ import com.visioglobe.visioonemeet.ui.FeatureMapScreen
 import com.visioglobe.visioonemeet.ui.FeatureMenuScreen
 import com.visioglobe.visioonemeet.ui.FloorSelectorOverlay
 import com.visioglobe.visioonemeet.ui.GeofencingOverlay
+import com.visioglobe.visioonemeet.ui.GeofencingSession
+import com.visioglobe.visioonemeet.ui.GeofencingSimulationHost
 import com.visioglobe.visioonemeet.ui.GoToPoiOverlay
 import com.visioglobe.visioonemeet.ui.HtmlOverlayMarkerOverlay
 import com.visioglobe.visioonemeet.ui.IconMarker3dOverlay
@@ -42,7 +44,10 @@ import com.visioglobe.visioonemeet.ui.PoiClickOverlay
 import com.visioglobe.visioonemeet.ui.ResetViewOverlay
 import com.visioglobe.visioonemeet.ui.RuntimeLocaleOverlay
 import com.visioglobe.visioonemeet.ui.SimulatedPositionOverlay
+import com.visioglobe.visioonemeet.ui.TrackedPositionSession
+import com.visioglobe.visioonemeet.ui.TrackedPositionSimulationHost
 import com.visioglobe.visioonemeet.ui.UiPartVisibilityOverlay
+import com.visioglobe.visioonemeet.ui.accuracyCircleStyleSession
 import com.visioglobe.visioonemeet.ui.setUiPartVisible
 import com.visioglobe.visioonemeet.ui.theme.VisioOneMeetTheme
 
@@ -75,6 +80,18 @@ class MainActivity : ComponentActivity() {
                         // disposed on every close) so the selection survives a close/reopen — the
                         // SDK has no getter for it. See docs/features/accuracy-circle-style.md.
                         var positionTrackerStyle by remember { mutableStateOf(PositionTrackerStyle()) }
+                        // The four tracked-position screens: the simulation state and its loop are
+                        // screen-level too (not inside the bottom sheet), so the simulation keeps
+                        // running while the sheet is closed and stops when this screen is left.
+                        // See docs/features/simulated-position.md.
+                        val trackedPositionSession = remember {
+                            if (feature == Feature.AccuracyCircleStyle) {
+                                accuracyCircleStyleSession()
+                            } else {
+                                TrackedPositionSession()
+                            }
+                        }
+                        val geofencingSession = remember { GeofencingSession(trackedPositionSession) }
                         FeatureMapScreen(
                             mapHash = if (feature == Feature.CustomData) CUSTOM_DATA_MAP_HASH else DEFAULT_MAP_HASH,
                             titleRes = feature?.titleRes,
@@ -92,6 +109,25 @@ class MainActivity : ComponentActivity() {
                                 }
                             },
                             onBack = { navController.popBackStack() },
+                            screenContent = { webView, bridgeState ->
+                                when (feature) {
+                                    Feature.SimulatedPosition,
+                                    Feature.CameraLockOnPosition,
+                                    Feature.AccuracyCircleStyle,
+                                    -> TrackedPositionSimulationHost(
+                                        trackedPositionSession,
+                                        webView,
+                                        bridgeState.positionsResolved,
+                                    )
+                                    Feature.Geofencing -> GeofencingSimulationHost(
+                                        geofencingSession,
+                                        webView,
+                                        bridgeState.positionsResolved,
+                                        bridgeState.zoneResolved,
+                                    )
+                                    else -> Unit
+                                }
+                            },
                             sheetContent = { webView, bridgeState ->
                                 when (feature) {
                                     Feature.ResetView -> ResetViewOverlay(webView)
@@ -105,11 +141,11 @@ class MainActivity : ComponentActivity() {
                                     Feature.NativeUiReplacement ->
                                         NativeUiReplacementOverlay(webView, bridgeState.floorSelector)
                                     Feature.SimulatedPosition ->
-                                        SimulatedPositionOverlay(webView, bridgeState.positionsResolved)
+                                        SimulatedPositionOverlay(trackedPositionSession, webView)
                                     Feature.CameraLockOnPosition ->
                                         CameraLockOnPositionOverlay(
+                                            trackedPositionSession,
                                             webView,
-                                            bridgeState.positionsResolved,
                                             bridgeState.isCameraLocked,
                                         )
                                     Feature.ClickableSurface -> ClickableSurfaceOverlay(webView)
@@ -124,9 +160,8 @@ class MainActivity : ComponentActivity() {
                                     Feature.AddLocale ->
                                         AddLocaleOverlay(webView, bridgeState.addLocaleResolved)
                                     Feature.Geofencing -> GeofencingOverlay(
+                                        geofencingSession,
                                         webView,
-                                        bridgeState.positionsResolved,
-                                        bridgeState.zoneResolved,
                                         bridgeState.isInsideGeofenceZone,
                                     )
                                     Feature.CustomBaseUrl -> CustomBaseUrlOverlay(
@@ -147,8 +182,8 @@ class MainActivity : ComponentActivity() {
                                         HtmlOverlayMarkerOverlay(webView, bridgeState.htmlMarkerState)
                                     Feature.CustomTheme -> CustomThemeOverlay(webView, bridgeState.themeState)
                                     Feature.AccuracyCircleStyle -> AccuracyCircleStyleOverlay(
+                                        trackedPositionSession,
                                         webView,
-                                        bridgeState.positionsResolved,
                                         positionTrackerStyle,
                                         onStyleChange = { positionTrackerStyle = it },
                                     )

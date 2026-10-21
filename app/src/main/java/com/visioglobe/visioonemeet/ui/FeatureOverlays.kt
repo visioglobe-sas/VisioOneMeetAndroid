@@ -29,12 +29,14 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -1267,54 +1269,61 @@ fun NativeUiReplacementOverlay(webView: WebView?, floorSelector: FloorSelectorSt
 }
 
 /**
- * Origin/Destination POI ID fields, a radius `Slider` (1-20m,
- * [SIMULATED_POSITION_DEFAULT_RADIUS_METERS] by default) and a Start/Stop toggle button — same
- * toggle pattern as [OccupancySimulationOverlay] — shared by [SimulatedPositionOverlay] and
- * [CameraLockOnPositionOverlay] (the latter needs a moving position to demonstrate a camera lock
- * on it). Pressing Start resolves both POI ids in one round trip via [WebView.resolvePositions]; a
- * `null` slot in the response ("POI not found") surfaces [errorMessage] below the fields instead
- * of starting anything, same error-surfacing convention as [ComputeNavigationOverlay]. Once both
- * positions resolve, a [LaunchedEffect] repeatedly calls [WebView.injectTrackedPosition] with a
- * point linearly interpolated between origin and destination, ping-ponging back and forth —
- * reading [radiusMeters] fresh on every tick, so moving the slider while running changes the
- * radius on the *next* tick with no restart needed. Stop (or leaving the screen, which cancels
- * this effect and tears down the WebView) calls [WebView.stopTrackedPosition] via the effect's
- * `finally` block, same cleanup-on-cancellation idiom as [OccupancySimulationOverlay].
- * [onRunningChanged] reports every start/stop transition so a caller can react (e.g. enabling a
- * dependent switch); [extraContent] renders below the Start/Stop button and its error message,
- * nothing for [SimulatedPositionOverlay], the camera-lock switch for [CameraLockOnPositionOverlay].
- * [initialOriginId]/[initialDestinationId]/[initialRadiusMeters] pre-fill the fields (empty and
- * [SIMULATED_POSITION_DEFAULT_RADIUS_METERS] unless a caller overrides them, e.g.
- * [AccuracyCircleStyleOverlay]).
- * See docs/features/simulated-position.md and docs/features/camera-lock-on-position.md.
+ * Screen-level state of a tracked-position simulation (`simulated-position`,
+ * `camera-lock-on-position`, `geofencing`, `accuracy-circle-style`): the Origin/Destination POI
+ * IDs, the accuracy radius, the running flag and the resolved segment being walked.
+ *
+ * It is created once per feature screen (in `MainActivity`, alongside the screen's other hoisted
+ * state) and never inside the FAB's bottom sheet: the sheet's content is disposed on every close,
+ * and the simulation must keep running while the sheet is closed so the visitor can pan/zoom the
+ * map around the moving position. The loop itself lives in [TrackedPositionSimulationHost], also
+ * composed at screen level, so there is exactly one loop per screen whatever the number of sheet
+ * open/close cycles; [TrackedPositionSimulationControls] only reads/writes this object. Leaving the
+ * screen disposes both (and the WebView), which stops the simulation.
+ *
+ * [start] resolves both POI ids in one round trip via [WebView.resolvePositions]; the response is
+ * fed back through [onPositionsResolved] (by [TrackedPositionSimulationHost], which sees every
+ * bridge response even while the sheet is closed). A `null` slot ("POI not found") surfaces
+ * [errorMessage] instead of starting anything.
+ * See docs/features/simulated-position.md.
  */
-@Composable
-private fun TrackedPositionSimulationControls(
-    webView: WebView?,
-    positionsResolved: ResolvedPositionsPair?,
-    onRunningChanged: (Boolean) -> Unit = {},
-    startEnabled: Boolean = true,
-    onTick: (latitude: Double, longitude: Double) -> Unit = { _, _ -> },
-    extraContent: @Composable () -> Unit = {},
+@Stable
+class TrackedPositionSession(
     initialOriginId: String = "",
     initialDestinationId: String = "",
     initialRadiusMeters: Float = SIMULATED_POSITION_DEFAULT_RADIUS_METERS,
 ) {
-    var originId by remember { mutableStateOf(initialOriginId) }
-    var destinationId by remember { mutableStateOf(initialDestinationId) }
-    var radiusMeters by remember { mutableFloatStateOf(initialRadiusMeters) }
-    var isRunning by remember { mutableStateOf(false) }
-    var errorMessage by remember { mutableStateOf<String?>(null) }
-    var activePositions by remember { mutableStateOf<Pair<ResolvedPosition, ResolvedPosition>?>(null) }
-    var pendingRequestId by remember { mutableStateOf<Int?>(null) }
-    var nextRequestId by remember { mutableStateOf(0) }
+    var originId by mutableStateOf(initialOriginId)
+    var destinationId by mutableStateOf(initialDestinationId)
+    var radiusMeters by mutableFloatStateOf(initialRadiusMeters)
+    var isRunning by mutableStateOf(false)
+        private set
+    var errorMessage by mutableStateOf<String?>(null)
+        private set
+    internal var activePositions by mutableStateOf<Pair<ResolvedPosition, ResolvedPosition>?>(null)
+        private set
 
-    // Reacts to the response of the resolvePositions() call fired by the Start button below.
-    // `requestId` guards against a stale response from a superseded request overwriting the
-    // outcome of a more recent one (both are near-instant in practice, but this costs nothing).
-    LaunchedEffect(positionsResolved) {
-        val result = positionsResolved ?: return@LaunchedEffect
-        if (result.requestId != pendingRequestId) return@LaunchedEffect
+    // `requestId` guards against a stale response from a superseded request overwriting the outcome
+    // of a more recent one (both are near-instant in practice, but this costs nothing).
+    private var pendingRequestId: Int? = null
+    private var nextRequestId = 0
+
+    fun start(webView: WebView?) {
+        if (isRunning) return
+        errorMessage = null
+        val requestId = nextRequestId++
+        pendingRequestId = requestId
+        webView?.resolvePositions(requestId, originId.trim(), destinationId.trim())
+    }
+
+    fun stop() {
+        isRunning = false
+        activePositions = null
+        pendingRequestId = null
+    }
+
+    internal fun onPositionsResolved(result: ResolvedPositionsPair) {
+        if (result.requestId != pendingRequestId) return
         pendingRequestId = null
         val origin = result.origin
         val destination = result.destination
@@ -1327,69 +1336,48 @@ private fun TrackedPositionSimulationControls(
             isRunning = true
         }
     }
+}
 
-    LaunchedEffect(isRunning) { onRunningChanged(isRunning) }
+/** [TrackedPositionSession] pre-filled for `accuracy-circle-style` (two demo-map POIs, 6 m radius). */
+fun accuracyCircleStyleSession() = TrackedPositionSession(
+    initialOriginId = ACCURACY_CIRCLE_STYLE_ORIGIN_ID,
+    initialDestinationId = ACCURACY_CIRCLE_STYLE_DESTINATION_ID,
+    initialRadiusMeters = ACCURACY_CIRCLE_STYLE_DEFAULT_RADIUS_METERS,
+)
 
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(16.dp),
-    ) {
-        Row(modifier = Modifier.fillMaxWidth()) {
-            OutlinedTextField(
-                value = originId,
-                onValueChange = { originId = it },
-                label = { Text("Origin POI ID") },
-                singleLine = true,
-                enabled = !isRunning,
-                modifier = Modifier.weight(1f),
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            OutlinedTextField(
-                value = destinationId,
-                onValueChange = { destinationId = it },
-                label = { Text("Destination POI ID") },
-                singleLine = true,
-                enabled = !isRunning,
-                modifier = Modifier.weight(1f),
-            )
-        }
-        Spacer(modifier = Modifier.height(8.dp))
-        Text("Accuracy radius: ${radiusMeters.roundToInt()} m")
-        Slider(
-            value = radiusMeters,
-            onValueChange = { radiusMeters = it },
-            valueRange = SIMULATED_POSITION_MIN_RADIUS_METERS..SIMULATED_POSITION_MAX_RADIUS_METERS,
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-        Button(
-            onClick = {
-                if (isRunning) {
-                    isRunning = false
-                    activePositions = null
-                    pendingRequestId = null
-                } else {
-                    errorMessage = null
-                    val requestId = nextRequestId++
-                    pendingRequestId = requestId
-                    webView?.resolvePositions(requestId, originId.trim(), destinationId.trim())
-                }
-            },
-            enabled = isRunning || (originId.isNotBlank() && destinationId.isNotBlank() && startEnabled),
-        ) {
-            Text(if (isRunning) "Stop simulated position" else "Start simulated position")
-        }
-        if (errorMessage != null) {
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(text = errorMessage.orEmpty(), color = MaterialTheme.colorScheme.error)
-        }
-        extraContent()
+/**
+ * Drives a [TrackedPositionSession]; composed at screen level (via `FeatureMapScreen`'s
+ * `screenContent`), never inside the bottom sheet. Feeds [positionsResolved] to the session, then,
+ * while it runs, repeatedly calls [WebView.injectTrackedPosition] with a point linearly
+ * interpolated between origin and destination, ping-ponging back and forth — reading
+ * [TrackedPositionSession.radiusMeters] fresh on every tick, so moving the slider while running
+ * changes the radius on the *next* tick with no restart needed. Stop (or leaving the screen, which
+ * cancels this effect and tears down the WebView) calls [WebView.stopTrackedPosition] via the
+ * effect's `finally` block, same cleanup-on-cancellation idiom as [OccupancySimulationOverlay].
+ * [onRunningChanged] reports every start/stop transition (e.g. geofencing's zone resolve/clear);
+ * [onTick] runs with every injected point.
+ */
+@Composable
+fun TrackedPositionSimulationHost(
+    session: TrackedPositionSession,
+    webView: WebView?,
+    positionsResolved: ResolvedPositionsPair?,
+    onRunningChanged: (Boolean) -> Unit = {},
+    onTick: (latitude: Double, longitude: Double) -> Unit = { _, _ -> },
+) {
+    val currentOnRunningChanged by rememberUpdatedState(onRunningChanged)
+    val currentOnTick by rememberUpdatedState(onTick)
+
+    LaunchedEffect(positionsResolved) {
+        positionsResolved?.let(session::onPositionsResolved)
     }
 
-    LaunchedEffect(isRunning, activePositions, webView) {
-        val (origin, destination) = activePositions ?: return@LaunchedEffect
+    LaunchedEffect(session.isRunning) { currentOnRunningChanged(session.isRunning) }
+
+    LaunchedEffect(session.isRunning, session.activePositions, webView) {
+        val (origin, destination) = session.activePositions ?: return@LaunchedEffect
         val view = webView ?: return@LaunchedEffect
-        if (!isRunning) return@LaunchedEffect
+        if (!session.isRunning) return@LaunchedEffect
 
         var fraction = 0.0
         var direction = 1.0
@@ -1397,8 +1385,8 @@ private fun TrackedPositionSimulationControls(
             while (isActive) {
                 val latitude = origin.latitude + (destination.latitude - origin.latitude) * fraction
                 val longitude = origin.longitude + (destination.longitude - origin.longitude) * fraction
-                view.injectTrackedPosition(latitude, longitude, radiusMeters.toDouble())
-                onTick(latitude, longitude)
+                view.injectTrackedPosition(latitude, longitude, session.radiusMeters.toDouble())
+                currentOnTick(latitude, longitude)
                 delay(SIMULATED_POSITION_INTERVAL_MS)
                 fraction += direction * SIMULATED_POSITION_STEP
                 when {
@@ -1419,12 +1407,78 @@ private fun TrackedPositionSimulationControls(
 }
 
 /**
+ * Origin/Destination POI ID fields, a radius `Slider` (1-20m,
+ * [SIMULATED_POSITION_DEFAULT_RADIUS_METERS] by default) and a Start/Stop toggle button — same
+ * toggle pattern as [OccupancySimulationOverlay] — bound to a screen-level
+ * [TrackedPositionSession] (see its kdoc for why it isn't held here), so reopening the sheet shows
+ * the current state. Shared by the four tracked-position screens; [extraContent] renders below the
+ * Start/Stop button and its error message (nothing for [SimulatedPositionOverlay], the camera-lock
+ * switch for [CameraLockOnPositionOverlay], etc.). [startEnabled] gates Start on screen-specific
+ * input (geofencing's zone id).
+ * See docs/features/simulated-position.md and docs/features/camera-lock-on-position.md.
+ */
+@Composable
+private fun TrackedPositionSimulationControls(
+    session: TrackedPositionSession,
+    webView: WebView?,
+    startEnabled: Boolean = true,
+    extraContent: @Composable () -> Unit = {},
+) {
+    val isRunning = session.isRunning
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp),
+    ) {
+        Row(modifier = Modifier.fillMaxWidth()) {
+            OutlinedTextField(
+                value = session.originId,
+                onValueChange = { session.originId = it },
+                label = { Text("Origin POI ID") },
+                singleLine = true,
+                enabled = !isRunning,
+                modifier = Modifier.weight(1f),
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            OutlinedTextField(
+                value = session.destinationId,
+                onValueChange = { session.destinationId = it },
+                label = { Text("Destination POI ID") },
+                singleLine = true,
+                enabled = !isRunning,
+                modifier = Modifier.weight(1f),
+            )
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        Text("Accuracy radius: ${session.radiusMeters.roundToInt()} m")
+        Slider(
+            value = session.radiusMeters,
+            onValueChange = { session.radiusMeters = it },
+            valueRange = SIMULATED_POSITION_MIN_RADIUS_METERS..SIMULATED_POSITION_MAX_RADIUS_METERS,
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Button(
+            onClick = { if (isRunning) session.stop() else session.start(webView) },
+            enabled = isRunning ||
+                (session.originId.isNotBlank() && session.destinationId.isNotBlank() && startEnabled),
+        ) {
+            Text(if (isRunning) "Stop simulated position" else "Start simulated position")
+        }
+        session.errorMessage?.let { message ->
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(text = message, color = MaterialTheme.colorScheme.error)
+        }
+        extraContent()
+    }
+}
+
+/**
  * FAB-triggered control for `simulated-position`: [TrackedPositionSimulationControls] with no
  * extra content. See docs/features/simulated-position.md.
  */
 @Composable
-fun SimulatedPositionOverlay(webView: WebView?, positionsResolved: ResolvedPositionsPair?) {
-    TrackedPositionSimulationControls(webView, positionsResolved)
+fun SimulatedPositionOverlay(session: TrackedPositionSession, webView: WebView?) {
+    TrackedPositionSimulationControls(session, webView)
 }
 
 /**
@@ -1435,21 +1489,19 @@ fun SimulatedPositionOverlay(webView: WebView?, positionsResolved: ResolvedPosit
  * running (nothing to lock onto). It never holds its own value: [isCameraLocked] mirrors the SDK's
  * flag, pushed back on every `trackingon`/`trackingoff`/`trackingchanged` event (see
  * [FeatureBridgeState.isCameraLocked]) — so it shows on right after Start (the SDK locks by itself
- * when tracking starts), off after Stop, and off when the visitor pans the map while locked.
+ * when tracking starts), off after Stop, and off when the visitor pans the map while locked (the
+ * simulation keeps running with the sheet closed, so the map can be panned meanwhile).
  * See docs/features/camera-lock-on-position.md.
  */
 @Composable
 fun CameraLockOnPositionOverlay(
+    session: TrackedPositionSession,
     webView: WebView?,
-    positionsResolved: ResolvedPositionsPair?,
     isCameraLocked: Boolean,
 ) {
-    var isRunning by remember { mutableStateOf(false) }
-
     TrackedPositionSimulationControls(
+        session = session,
         webView = webView,
-        positionsResolved = positionsResolved,
-        onRunningChanged = { running -> isRunning = running },
         extraContent = {
             Spacer(modifier = Modifier.height(8.dp))
             Row(
@@ -1459,7 +1511,7 @@ fun CameraLockOnPositionOverlay(
                 Text(text = "Recenter camera on position", modifier = Modifier.weight(1f))
                 Switch(
                     checked = isCameraLocked,
-                    enabled = isRunning,
+                    enabled = session.isRunning,
                     onCheckedChange = { locked -> webView?.setCameraLockOnPosition(locked) },
                 )
             }
@@ -1502,9 +1554,10 @@ private val POSITION_TRACKER_COLOR_PRESETS = listOf(
 )
 
 /**
- * FAB-triggered control for `accuracy-circle-style`: [TrackedPositionSimulationControls] (pre-filled
- * with two POIs of the demo map and a 6 m radius — a moving tracked position is needed to see its
- * style; only the circle is recolored, not the center arrow) plus color preset chips and an opacity `Slider` (0.1-1.0, step 0.1). Every change calls
+ * FAB-triggered control for `accuracy-circle-style`: [TrackedPositionSimulationControls] bound to a
+ * session pre-filled by [accuracyCircleStyleSession] (two POIs of the demo map and a 6 m radius — a
+ * moving tracked position is needed to see its style; only the circle is recolored, not the center
+ * arrow) plus color preset chips and an opacity `Slider` (0.1-1.0, step 0.1). Every change calls
  * [WebView.setPositionTrackerStyle] immediately, running or not: the SDK applies it at the next
  * inject (every tick while running), and the JS side re-applies it on each Start since the SDK
  * resets it on every stop. [style] is hoisted by the caller so it survives the sheet being closed
@@ -1512,8 +1565,8 @@ private val POSITION_TRACKER_COLOR_PRESETS = listOf(
  */
 @Composable
 fun AccuracyCircleStyleOverlay(
+    session: TrackedPositionSession,
     webView: WebView?,
-    positionsResolved: ResolvedPositionsPair?,
     style: PositionTrackerStyle,
     onStyleChange: (PositionTrackerStyle) -> Unit,
 ) {
@@ -1523,15 +1576,12 @@ fun AccuracyCircleStyleOverlay(
     }
 
     TrackedPositionSimulationControls(
+        session = session,
         webView = webView,
-        positionsResolved = positionsResolved,
-        initialOriginId = ACCURACY_CIRCLE_STYLE_ORIGIN_ID,
-        initialDestinationId = ACCURACY_CIRCLE_STYLE_DESTINATION_ID,
-        initialRadiusMeters = ACCURACY_CIRCLE_STYLE_DEFAULT_RADIUS_METERS,
         extraContent = {
             // Kept compact on purpose: the camera follows the tracked position (centered in the
-            // map), and closing the sheet stops the simulation, so the sheet must stay short
-            // enough for the precision circle to remain visible above it.
+            // map), so the sheet must stay short enough for the precision circle to remain visible
+            // above it while tweaking the style.
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     text = stringResource(R.string.accuracy_circle_style_color_label),
@@ -2147,37 +2197,33 @@ fun AddLocaleOverlay(webView: WebView?, addLocaleResolved: AddLocaleResult?) {
 }
 
 /**
- * FAB-triggered control for `geofencing`: [TrackedPositionSimulationControls] (a moving simulated
- * position is needed to demonstrate entering/leaving a zone) plus a "Zone POI ID" field resolved
- * once at Start via [WebView.resolveZone] — Start is disabled until the field is non-blank, same
- * `startEnabled` gate CameraLockOnPositionOverlay leaves at its default. Every tick of the
- * simulation loop also calls [WebView.checkGeofence] with the freshly interpolated position (piggy-
- * backed via [TrackedPositionSimulationControls]'s `onTick`, no separate polling), whose result is
- * reported back live via `AndroidBridge.onGeofenceStateChanged` and shown as "Inside zone"/"Outside
- * zone" text — the JS side itself also recolors the zone's surface(s) as a visual alert on a state
- * transition, this overlay never touches `venue.updateSurface` directly. Stopping the simulation
- * calls [WebView.clearZone] to revert that color and forget the zone, so restarting always begins
- * from a clean, unresolved zone — a "fresh opt-in each time" idiom.
- * See docs/features/geofencing.md.
+ * Screen-level state for `geofencing`: the shared [tracking] simulation plus the "Zone POI ID"
+ * field and its resolution outcome — held outside the bottom sheet for the same reason as
+ * [TrackedPositionSession]. See docs/features/geofencing.md.
  */
-@Composable
-fun GeofencingOverlay(
-    webView: WebView?,
-    positionsResolved: ResolvedPositionsPair?,
-    zoneResolved: ZoneResolution?,
-    isInsideZone: Boolean,
-) {
-    var zoneId by remember { mutableStateOf("") }
-    var isRunning by remember { mutableStateOf(false) }
-    var zoneErrorMessage by remember { mutableStateOf<String?>(null) }
-    var pendingZoneRequestId by remember { mutableStateOf<Int?>(null) }
-    var nextZoneRequestId by remember { mutableStateOf(0) }
+@Stable
+class GeofencingSession(val tracking: TrackedPositionSession = TrackedPositionSession()) {
+    var zoneId by mutableStateOf("")
+    var zoneErrorMessage by mutableStateOf<String?>(null)
+        private set
+    private var pendingZoneRequestId: Int? = null
+    private var nextZoneRequestId = 0
 
-    // Reacts to the response of the resolveZone() call fired when the simulation starts. `requestId`
-    // guards against a stale response the same way positionsResolved does above.
-    LaunchedEffect(zoneResolved) {
-        val result = zoneResolved ?: return@LaunchedEffect
-        if (result.requestId != pendingZoneRequestId) return@LaunchedEffect
+    internal fun onRunningChanged(webView: WebView?, running: Boolean) {
+        if (running) {
+            zoneErrorMessage = null
+            val requestId = nextZoneRequestId++
+            pendingZoneRequestId = requestId
+            webView?.resolveZone(requestId, zoneId.trim())
+        } else {
+            pendingZoneRequestId = null
+            webView?.clearZone()
+        }
+    }
+
+    // `requestId` guards against a stale response the same way positionsResolved does.
+    internal fun onZoneResolved(result: ZoneResolution) {
+        if (result.requestId != pendingZoneRequestId) return
         pendingZoneRequestId = null
         zoneErrorMessage = when (result.status) {
             "not-found" -> "Zone POI not found"
@@ -2185,38 +2231,70 @@ fun GeofencingOverlay(
             else -> null
         }
     }
+}
 
-    TrackedPositionSimulationControls(
+/**
+ * Screen-level driver for `geofencing`: [TrackedPositionSimulationHost] whose start resolves the
+ * zone once via [WebView.resolveZone] and whose stop calls [WebView.clearZone] (reverting the zone's
+ * color and forgetting it, so restarting always begins from a clean, unresolved zone — a "fresh
+ * opt-in each time" idiom). Every tick also calls [WebView.checkGeofence] with the freshly
+ * interpolated position (no separate polling), whose result is reported back live via
+ * `AndroidBridge.onGeofenceStateChanged` — the JS side itself recolors the zone's surface(s) as a
+ * visual alert on a state transition, so the alert keeps working while the sheet is closed.
+ */
+@Composable
+fun GeofencingSimulationHost(
+    session: GeofencingSession,
+    webView: WebView?,
+    positionsResolved: ResolvedPositionsPair?,
+    zoneResolved: ZoneResolution?,
+) {
+    LaunchedEffect(zoneResolved) {
+        zoneResolved?.let(session::onZoneResolved)
+    }
+
+    TrackedPositionSimulationHost(
+        session = session.tracking,
         webView = webView,
         positionsResolved = positionsResolved,
-        startEnabled = zoneId.isNotBlank(),
-        onRunningChanged = { running ->
-            isRunning = running
-            if (running) {
-                zoneErrorMessage = null
-                val requestId = nextZoneRequestId++
-                pendingZoneRequestId = requestId
-                webView?.resolveZone(requestId, zoneId.trim())
-            } else {
-                pendingZoneRequestId = null
-                webView?.clearZone()
-            }
-        },
+        onRunningChanged = { running -> session.onRunningChanged(webView, running) },
         onTick = { latitude, longitude -> webView?.checkGeofence(latitude, longitude) },
+    )
+}
+
+/**
+ * FAB-triggered control for `geofencing`: [TrackedPositionSimulationControls] (a moving simulated
+ * position is needed to demonstrate entering/leaving a zone) plus the "Zone POI ID" field — Start
+ * is disabled until it is non-blank — and the live "Inside zone"/"Outside zone" state. Everything
+ * it shows lives in the screen-level [GeofencingSession], driven by [GeofencingSimulationHost].
+ * See docs/features/geofencing.md.
+ */
+@Composable
+fun GeofencingOverlay(
+    session: GeofencingSession,
+    webView: WebView?,
+    isInsideZone: Boolean,
+) {
+    val isRunning = session.tracking.isRunning
+    TrackedPositionSimulationControls(
+        session = session.tracking,
+        webView = webView,
+        startEnabled = session.zoneId.isNotBlank(),
         extraContent = {
             Spacer(modifier = Modifier.height(8.dp))
             OutlinedTextField(
-                value = zoneId,
-                onValueChange = { zoneId = it },
+                value = session.zoneId,
+                onValueChange = { session.zoneId = it },
                 label = { Text("Zone POI ID") },
                 singleLine = true,
                 enabled = !isRunning,
                 modifier = Modifier.fillMaxWidth(),
             )
+            val zoneErrorMessage = session.zoneErrorMessage
             when {
                 zoneErrorMessage != null -> {
                     Spacer(modifier = Modifier.height(8.dp))
-                    Text(text = zoneErrorMessage.orEmpty(), color = MaterialTheme.colorScheme.error)
+                    Text(text = zoneErrorMessage, color = MaterialTheme.colorScheme.error)
                 }
                 isRunning -> {
                     Spacer(modifier = Modifier.height(8.dp))
