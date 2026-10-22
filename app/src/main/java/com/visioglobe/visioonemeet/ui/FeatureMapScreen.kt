@@ -95,6 +95,7 @@ data class FeatureBridgeState(
     val isMapReady: Boolean = false,
     val cameraProjection: String? = null,
     val onReloadWithCameraProjection: (String) -> Unit = {},
+    val carouselState: CarouselState = CarouselState(),
 )
 
 /**
@@ -205,6 +206,13 @@ data class FeatureBridgeState(
  * (`null` while reloading), and [FeatureBridgeState.isMapReady] lets the control disable itself
  * until then. See docs/features/camera-projection-toggle.md.
  *
+ * `camera-showcase-carousel`'s tour loop runs entirely in the web page; every change of its state —
+ * Start/Stop, but also a touch on the map (pause) or the idle timer (resume), both of which happen
+ * with the sheet closed — is pushed via `AndroidBridge.onCarouselStateChanged`, surfaced via
+ * [FeatureBridgeState.carouselState], so the reopened sheet shows the current status. Leaving the
+ * screen destroys the WebView (below), which ends the loop and its timers with it. See
+ * docs/features/camera-showcase-carousel.md.
+ *
  * Every WebView recreated that way (and the one left when the screen is popped) is destroyed in
  * `onRelease`, so repeated reloads don't pile up live pages, WebGL contexts or bridge callbacks
  * from a page that is no longer on screen.
@@ -263,6 +271,7 @@ fun FeatureMapScreen(
     var isCameraLocked by remember { mutableStateOf(false) }
     var requestedCameraProjection by remember { mutableStateOf(DEFAULT_CAMERA_PROJECTION) }
     var reportedCameraProjection by remember { mutableStateOf<String?>(null) }
+    var carouselState by remember { mutableStateOf(CarouselState()) }
     val sheetState = rememberModalBottomSheetState()
 
     Scaffold(
@@ -417,6 +426,9 @@ fun FeatureMapScreen(
                                     notifyCameraProjectionReported = { projection ->
                                         mainHandler.post { reportedCameraProjection = projection }
                                     },
+                                    notifyCarouselStateChanged = { stateJson ->
+                                        mainHandler.post { carouselState = parseCarouselStatePayload(stateJson) }
+                                    },
                                 ),
                                 "AndroidBridge",
                             )
@@ -494,6 +506,7 @@ fun FeatureMapScreen(
                 requestedCameraProjection = newProjection
             }
         },
+        carouselState = carouselState,
     )
 
     screenContent(webView, bridgeState)
@@ -532,6 +545,7 @@ private class MapBridge(
     private val notifyThemeStateChanged: (String) -> Unit,
     private val notifyCameraLockChanged: (Boolean) -> Unit,
     private val notifyCameraProjectionReported: (String) -> Unit,
+    private val notifyCarouselStateChanged: (String) -> Unit,
 ) {
     @JavascriptInterface
     fun onMapReady() = onReady()
@@ -603,4 +617,7 @@ private class MapBridge(
 
     @JavascriptInterface
     fun onCameraProjectionReported(projection: String) = notifyCameraProjectionReported(projection)
+
+    @JavascriptInterface
+    fun onCarouselStateChanged(stateJson: String) = notifyCarouselStateChanged(stateJson)
 }
