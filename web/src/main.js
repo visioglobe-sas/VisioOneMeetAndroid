@@ -385,6 +385,12 @@ function installCarouselTouchListener() {
 // interpolating them into the generated script call, so what arrives here
 // is already a real JS value (array/object), never a string to re-parse.
 window.MapBridge = {
+  // auth-token (code sample): token refresh entry point. Tokens are short-lived; call this with a
+  // fresh one before the current one expires — it applies to every subsequent map request, no
+  // reload needed. See docs/features/auth-token.md.
+  setAuthorizationToken(freshToken) {
+    if (venue) venue.setAuthorizationToken(freshToken);
+  },
   goToGlobal() {
     if (view) view.goToGlobal();
   },
@@ -1313,10 +1319,31 @@ function onPoiClick(event) {
   bridge?.onPoiClick(JSON.stringify(pois));
 }
 
-async function main() {
+// auth-token (code sample): set when the Android app loads this page for a protected map (see
+// app/src/main/java/com/visioglobe/visioonemeet/sample/ProtectedMapSample.kt). The page then
+// asks the native side for the protected map's load options instead of loading the public demo
+// map. No screen of this demo sets it — there is no protected demo map. See
+// docs/features/auth-token.md.
+const isProtectedMap = new URLSearchParams(window.location.search).get('protected') === 'true';
+
+// The SDK rejects `loadVenue` with an `UnauthorizedError` when the token is invalid, expired or
+// missing — but SDK 1.1.0 does not export that class from its package entry (so no `instanceof`
+// from here) and does not set `error.name` (it stays 'Error'). Its constructor name and its
+// message are the only distinguishing traits; both are checked so the test survives a bundler
+// that renames classes.
+function isUnauthorizedError(error) {
+  return (
+    error?.constructor?.name === 'UnauthorizedError' ||
+    /authorization token/i.test(String(error?.message ?? ''))
+  );
+}
+
+// Loads a venue and creates the view, shared by the public demo map (main) and the protected
+// map sample (loadProtectedVenue): every screen goes through the same view setup.
+async function loadAndShowVenue(loadOptions, loaderContainer) {
   try {
     const visioOne = createVisioOne();
-    venue = await visioOne.loadVenue({ vg_maphash: hash, baseURL });
+    venue = await visioOne.loadVenue(loadOptions, loaderContainer);
     const viewOptions = {
       ...(enableShadows ? { enableShadows: true } : {}),
       ...(cameraProjection ? { cameraProjection } : {}),
@@ -1351,8 +1378,34 @@ async function main() {
     bridge?.onCameraProjectionReported(view.cameraProjection);
     bridge?.onMapReady();
   } catch (error) {
-    bridge?.onMapError(String(error?.message ?? error));
+    if (isUnauthorizedError(error)) {
+      // auth-token: reported apart from other load errors — the fix is a fresh token, not a
+      // different hash or server. See docs/features/auth-token.md.
+      console.warn('[auth-token] UnauthorizedError:', error?.message);
+      bridge?.onAuthorizationError(String(error?.message ?? error));
+    } else {
+      bridge?.onMapError(String(error?.message ?? error));
+    }
   }
+}
+
+// auth-token (code sample): loads a map protected by an authorization token. `authorizationToken`
+// is sent by the SDK as `Authorization: Bearer <token>` on every map request, and is only
+// enforced by the protected map server given as `baseURL`. See docs/features/auth-token.md.
+function loadProtectedVenue({ vg_maphash, baseURL: protectedBaseURL, authorizationToken }) {
+  return loadAndShowVenue(
+    { vg_maphash, baseURL: protectedBaseURL, authorizationToken },
+    container,
+  );
+}
+
+function main() {
+  if (isProtectedMap) {
+    // Pulled synchronously from the native side (MapBridge.getProtectedMapOptions in
+    // FeatureMapScreen.kt): a JSON object { vg_maphash, baseURL, authorizationToken }.
+    return loadProtectedVenue(JSON.parse(bridge.getProtectedMapOptions()));
+  }
+  return loadAndShowVenue({ vg_maphash: hash, baseURL });
 }
 
 main();

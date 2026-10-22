@@ -16,6 +16,7 @@ import com.visioglobe.visioonemeet.model.Feature
 import com.visioglobe.visioonemeet.ui.AccessibleModeOverlay
 import com.visioglobe.visioonemeet.ui.AccuracyCircleStyleOverlay
 import com.visioglobe.visioonemeet.ui.AddLocaleOverlay
+import com.visioglobe.visioonemeet.ui.AuthTokenSampleScreen
 import com.visioglobe.visioonemeet.ui.CameraLockOnPositionOverlay
 import com.visioglobe.visioonemeet.ui.CameraProjectionToggleOverlay
 import com.visioglobe.visioonemeet.ui.CameraShowcaseCarouselOverlay
@@ -78,6 +79,15 @@ class MainActivity : ComponentActivity() {
                     }
                     composable("feature/{slug}") { backStackEntry ->
                         val feature = Feature.fromSlug(backStackEntry.arguments?.getString("slug"))
+                        // auth-token is a code sample only (no protected demo map): a text screen,
+                        // no map. See docs/features/auth-token.md.
+                        if (feature == Feature.AuthToken) {
+                            AuthTokenSampleScreen(
+                                onBack = { navController.popBackStack() },
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                            return@composable
+                        }
                         // accuracy-circle-style: hoisted here (not inside the bottom sheet, which is
                         // disposed on every close) so the selection survives a close/reopen — the
                         // SDK has no getter for it. See docs/features/accuracy-circle-style.md.
@@ -196,7 +206,7 @@ class MainActivity : ComponentActivity() {
                                     )
                                     Feature.CameraShowcaseCarousel ->
                                         CameraShowcaseCarouselOverlay(webView, bridgeState.carouselState)
-                                    null -> Unit
+                                    Feature.AuthToken, null -> Unit
                                 }
                             },
                         )

@@ -55,4 +55,4 @@ Changing `currentBaseUrl` gives the `key()` block a new identity, so Compose dis
 
 ## Learn more
 
-- `LoadOptions` also has an `authorizationToken` field for a protected map server — the same "reload from scratch to change it" caveat applies, not demonstrated in this repo.
+- `LoadOptions` also has an `authorizationToken` field for a protected map server — see [auth-token.md](auth-token.md) (code sample). Unlike `baseURL`, the token can be replaced on a loaded venue via `venue.setAuthorizationToken()`.
