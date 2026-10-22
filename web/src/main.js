@@ -295,7 +295,7 @@ async function runCarousel(generation) {
       const poiAnimation = view.goToPOI(poi, {
         duration: CAROUSEL_POI_DURATION_MS,
         easing: 'easeInOutQuad',
-        orientation: { heading: carouselStopIndex * 90, pitch: 45 },
+        orientation: { heading: carouselStopIndex * 90, pitch: 30 },
       });
       if (!(await carouselAwait(poiAnimation, generation))) {
         carouselInterrupted(generation);
@@ -316,11 +316,13 @@ function carouselInterrupted(generation) {
 }
 
 // Interrupts the hop in flight *in place*: starting a new camera animation
-// cancels the running one without moving the camera to the old destination,
-// whereas AnimationPromise.cancel() would make the camera jump to the end
-// state of the animation. A zero-length goToViewpoint on the current camera
-// target, keeping the current heading and pitch ('initial'), is that
-// "new animation".
+// cancels the running one without moving the camera to the old destination.
+// A zero-length goToViewpoint on the current camera target, keeping the
+// current heading and pitch ('initial'), is that "new animation".
+// (AnimationPromise.cancel() would also stop the camera where it is and
+// resolve with isCanceled === true; its public typing wrongly says it puts
+// the target in its final state, but the SDK core implementation and live
+// measurements say otherwise. This demo simply uses the new-animation route.)
 function interruptCarouselAnimation() {
   if (!carouselAnimation) return;
   carouselAnimation = null;
@@ -398,8 +400,8 @@ window.MapBridge = {
   },
   // camera-showcase-carousel: Stop. Only stops *scheduling* hops — the hop in
   // flight (if any) is left to end on its own, so the camera settles on a
-  // meaningful view instead of freezing mid-flight; cancel() is never used
-  // since it would make the camera jump to the hop's destination.
+  // meaningful view instead of freezing mid-flight (cancel() is not used:
+  // it would stop the camera where it is, mid-flight).
   carouselStop() {
     carouselGeneration++;
     clearTimeout(carouselResumeTimer);
