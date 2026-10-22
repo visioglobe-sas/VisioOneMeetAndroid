@@ -48,6 +48,13 @@ private const val ASSET_LOADER_DOMAIN = "appassets.androidx.local"
  */
 const val DEFAULT_SDK_BASE_URL = "https://mapserver.visioglobe.com/"
 
+/**
+ * The SDK's own default `ViewCreateOptions.cameraProjection` (`@defaultValue` in its typings): every
+ * screen but `camera-projection-toggle` keeps it, and omits the `?cameraProjection=` query param
+ * entirely. See docs/features/camera-projection-toggle.md.
+ */
+const val DEFAULT_CAMERA_PROJECTION = "perspective"
+
 private sealed interface MapLoadState {
     data object Loading : MapLoadState
     data object Ready : MapLoadState
@@ -85,6 +92,9 @@ data class FeatureBridgeState(
     val themeState: ThemeState? = null,
     val isCameraLocked: Boolean = false,
     val onReloadWithBaseUrl: (String) -> Unit = {},
+    val isMapReady: Boolean = false,
+    val cameraProjection: String? = null,
+    val onReloadWithCameraProjection: (String) -> Unit = {},
 )
 
 /**
@@ -186,6 +196,19 @@ data class FeatureBridgeState(
  * the old WebView and runs `factory` again from scratch. Every other screen just keeps using the
  * default value, so nothing changes for them. See docs/features/custom-base-url.md.
  *
+ * [FeatureBridgeState.cameraProjection]/[FeatureBridgeState.onReloadWithCameraProjection] back
+ * `camera-projection-toggle`, on the same principle as `custom-base-url`: `cameraProjection` is a
+ * `createView`-time option only (`view.cameraProjection` is read-only, no runtime switch), so
+ * switching it recreates the WebView — via the same [key] — against a new `?cameraProjection=`
+ * query param, i.e. a fresh page, `loadVenue` and `createView`. The web bundle reports the
+ * projection the new view was actually created with via `AndroidBridge.onCameraProjectionReported`
+ * (`null` while reloading), and [FeatureBridgeState.isMapReady] lets the control disable itself
+ * until then. See docs/features/camera-projection-toggle.md.
+ *
+ * Every WebView recreated that way (and the one left when the screen is popped) is destroyed in
+ * `onRelease`, so repeated reloads don't pile up live pages, WebGL contexts or bridge callbacks
+ * from a page that is no longer on screen.
+ *
  * [enableShadows] appends `&enableShadows=true` to the bridge page URL, which then passes
  * `{ enableShadows: true }` to `createView` — only `custom-theme` sets it, since a theme only
  * changes the scene lights, which are only rendered with shadows/lights enabled (and shadows are
@@ -238,6 +261,8 @@ fun FeatureMapScreen(
     var htmlMarkerState by remember { mutableStateOf<HtmlMarkerState?>(null) }
     var themeState by remember { mutableStateOf<ThemeState?>(null) }
     var isCameraLocked by remember { mutableStateOf(false) }
+    var requestedCameraProjection by remember { mutableStateOf(DEFAULT_CAMERA_PROJECTION) }
+    var reportedCameraProjection by remember { mutableStateOf<String?>(null) }
     val sheetState = rememberModalBottomSheetState()
 
     Scaffold(
@@ -271,7 +296,7 @@ fun FeatureMapScreen(
                 .fillMaxSize()
                 .padding(innerPadding),
         ) {
-            key(mapHash, currentBaseUrl) {
+            key(mapHash, currentBaseUrl, requestedCameraProjection) {
                 AndroidView(
                     modifier = Modifier.fillMaxSize(),
                     factory = { context ->
@@ -389,6 +414,9 @@ fun FeatureMapScreen(
                                     notifyCameraLockChanged = { locked ->
                                         mainHandler.post { isCameraLocked = locked }
                                     },
+                                    notifyCameraProjectionReported = { projection ->
+                                        mainHandler.post { reportedCameraProjection = projection }
+                                    },
                                 ),
                                 "AndroidBridge",
                             )
@@ -404,10 +432,16 @@ fun FeatureMapScreen(
                             loadUrl(
                                 "https://$ASSET_LOADER_DOMAIN/assets/www/index.html" +
                                     "?vg_maphash=$mapHash&baseUrl=$encodedBaseUrl" +
-                                    if (enableShadows) "&enableShadows=true" else "",
+                                    (if (enableShadows) "&enableShadows=true" else "") +
+                                    if (requestedCameraProjection != DEFAULT_CAMERA_PROJECTION) {
+                                        "&cameraProjection=$requestedCameraProjection"
+                                    } else {
+                                        ""
+                                    },
                             )
                         }.also { webView = it }
                     },
+                    onRelease = { it.destroy() },
                 )
             }
 
@@ -451,6 +485,15 @@ fun FeatureMapScreen(
             loadState = MapLoadState.Loading
             currentBaseUrl = newBaseUrl
         },
+        isMapReady = loadState is MapLoadState.Ready,
+        cameraProjection = reportedCameraProjection,
+        onReloadWithCameraProjection = { newProjection ->
+            if (newProjection != requestedCameraProjection) {
+                loadState = MapLoadState.Loading
+                reportedCameraProjection = null
+                requestedCameraProjection = newProjection
+            }
+        },
     )
 
     screenContent(webView, bridgeState)
@@ -488,6 +531,7 @@ private class MapBridge(
     private val notifyHtmlMarkerStateChanged: (String) -> Unit,
     private val notifyThemeStateChanged: (String) -> Unit,
     private val notifyCameraLockChanged: (Boolean) -> Unit,
+    private val notifyCameraProjectionReported: (String) -> Unit,
 ) {
     @JavascriptInterface
     fun onMapReady() = onReady()
@@ -556,4 +600,7 @@ private class MapBridge(
 
     @JavascriptInterface
     fun onCameraLockChanged(locked: Boolean) = notifyCameraLockChanged(locked)
+
+    @JavascriptInterface
+    fun onCameraProjectionReported(projection: String) = notifyCameraProjectionReported(projection)
 }

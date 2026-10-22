@@ -184,6 +184,18 @@ function reportHtmlMarkerState(status, extra) {
 // "computationally expensive"). See docs/features/custom-theme.md.
 const enableShadows = new URLSearchParams(window.location.search).get('enableShadows') === 'true';
 
+// camera-projection-toggle: `?cameraProjection=orthographic` is appended by the
+// Android app on that feature's screen only, and mapped here to createView's
+// `cameraProjection` option. The projection is a creation-time option only —
+// `view.cameraProjection` is read-only and there is no runtime switch — so the
+// app switches projection by recreating the whole WebView with the other value
+// (a fresh loadVenue + createView). Any other value (or none, every other
+// screen) leaves the option out and keeps the SDK default, 'perspective'.
+// This is deliberately not the SDK's own `?orthographic` page-URL flag, which
+// would silently override the option. See docs/features/camera-projection-toggle.md.
+const requestedCameraProjection = new URLSearchParams(window.location.search).get('cameraProjection');
+const cameraProjection = requestedCameraProjection === 'orthographic' ? 'orthographic' : undefined;
+
 // custom-theme: the SDK defaults (View.d.ts `@defaultValue`s, and the theme a
 // view starts with). There is no current-theme getter in the SDK, so the
 // applied theme is tracked here. See docs/features/custom-theme.md.
@@ -1126,7 +1138,15 @@ async function main() {
   try {
     const visioOne = createVisioOne();
     venue = await visioOne.loadVenue({ vg_maphash: hash, baseURL });
-    view = await visioOne.createView(container, venue, enableShadows ? { enableShadows: true } : undefined);
+    const viewOptions = {
+      ...(enableShadows ? { enableShadows: true } : {}),
+      ...(cameraProjection ? { cameraProjection } : {}),
+    };
+    view = await visioOne.createView(
+      container,
+      venue,
+      Object.keys(viewOptions).length > 0 ? viewOptions : undefined,
+    );
     view.addEventListener('poiclick', onPoiClick);
     view.addEventListener('currentfloorchanged', onCurrentFloorChanged);
     view.addEventListener('exploremodechanged', onExploreModeChanged);
@@ -1145,6 +1165,11 @@ async function main() {
     // currentExploreMode always starts at "global" and needs no venue data
     // to report. See docs/features/explore-mode.md.
     bridge?.onExploreModeChanged(view.currentExploreMode);
+    // Reports the projection the view was actually created with (read-only,
+    // resolved by the SDK as "page URL > createView option > default"), so the
+    // camera-projection control mirrors the SDK rather than what was requested.
+    // See docs/features/camera-projection-toggle.md.
+    bridge?.onCameraProjectionReported(view.cameraProjection);
     bridge?.onMapReady();
   } catch (error) {
     bridge?.onMapError(String(error?.message ?? error));

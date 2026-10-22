@@ -75,4 +75,9 @@
     <string name="accuracy_circle_style_color_green">Green</string>
     <string name="accuracy_circle_style_color_purple">Purple</string>
     <string name="accuracy_circle_style_opacity_label">Opacity: %1$s</string>
+    <string name="feature_camera_projection_toggle_title">Camera projection</string>
+    <string name="feature_camera_projection_toggle_description">Switch between a 3D perspective view and a flat orthographic view</string>
+    <string name="camera_projection_option_perspective">Perspective</string>
+    <string name="camera_projection_option_orthographic">Orthographic</string>
+    <string name="camera_projection_hint">Switching reloads the map (the projection can only be set when the view is created).</string>
 </resources>

@@ -74,4 +74,9 @@
     <string name="accuracy_circle_style_color_green">Vert</string>
     <string name="accuracy_circle_style_color_purple">Violet</string>
     <string name="accuracy_circle_style_opacity_label">Opacité : %1$s</string>
+    <string name="feature_camera_projection_toggle_title">Projection de la caméra</string>
+    <string name="feature_camera_projection_toggle_description">Basculer entre une vue 3D en perspective et une vue à plat orthographique</string>
+    <string name="camera_projection_option_perspective">Perspective</string>
+    <string name="camera_projection_option_orthographic">Orthographique</string>
+    <string name="camera_projection_hint">Changer de projection recharge la carte (la projection ne se choisit qu\'à la création de la vue).</string>
 </resources>
