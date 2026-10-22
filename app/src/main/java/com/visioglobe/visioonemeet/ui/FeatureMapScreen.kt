@@ -2,6 +2,7 @@ package com.visioglobe.visioonemeet.ui
 
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import android.view.ViewGroup
 import android.webkit.JavascriptInterface
 import android.webkit.WebResourceRequest
@@ -37,6 +38,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.webkit.WebViewAssetLoader
 import com.visioglobe.visioonemeet.R
+import com.visioglobe.visioonemeet.sample.ProtectedMapOptions
 import java.net.URLEncoder
 
 private const val ASSET_LOADER_DOMAIN = "appassets.androidx.local"
@@ -213,6 +215,14 @@ data class FeatureBridgeState(
  * screen destroys the WebView (below), which ends the loop and its timers with it. See
  * docs/features/camera-showcase-carousel.md.
  *
+ * `auth-token` (code sample, not used by any screen of this demo): a non-null [protectedMap] loads
+ * the page with `?protected=true` and no map hash in the URL (the SDK would let a URL
+ * `vg_maphash` override the load options); the page then pulls [protectedMap] through
+ * `AndroidBridge.getProtectedMapOptions` and loads it with its authorization token. An
+ * `UnauthorizedError` comes back through `AndroidBridge.onAuthorizationError`, apart from other
+ * load errors. [showControlsFab] hides the controls FAB for a screen with nothing to control. See
+ * docs/features/auth-token.md.
+ *
  * Every WebView recreated that way (and the one left when the screen is popped) is destroyed in
  * `onRelease`, so repeated reloads don't pile up live pages, WebGL contexts or bridge callbacks
  * from a page that is no longer on screen.
@@ -242,6 +252,8 @@ fun FeatureMapScreen(
     modifier: Modifier = Modifier,
     reactsToPoiClicks: Boolean = false,
     enableShadows: Boolean = false,
+    protectedMap: ProtectedMapOptions? = null,
+    showControlsFab: Boolean = true,
     onMapReady: (WebView) -> Unit = {},
     onBack: () -> Unit,
     screenContent: @Composable (webView: WebView?, bridgeState: FeatureBridgeState) -> Unit = { _, _ -> },
@@ -290,7 +302,7 @@ fun FeatureMapScreen(
             )
         },
         floatingActionButton = {
-            if (loadState is MapLoadState.Ready) {
+            if (showControlsFab && loadState is MapLoadState.Ready) {
                 FloatingActionButton(onClick = { showControls = true }) {
                     Icon(
                         painter = painterResource(R.drawable.ic_tune),
@@ -305,7 +317,7 @@ fun FeatureMapScreen(
                 .fillMaxSize()
                 .padding(innerPadding),
         ) {
-            key(mapHash, currentBaseUrl, requestedCameraProjection) {
+            key(mapHash, currentBaseUrl, requestedCameraProjection, protectedMap) {
                 AndroidView(
                     modifier = Modifier.fillMaxSize(),
                     factory = { context ->
@@ -333,6 +345,12 @@ fun FeatureMapScreen(
                                         }
                                     },
                                     onError = { message -> mainHandler.post { loadState = MapLoadState.Error(message) } },
+                                    onAuthorizationError = { message ->
+                                        Log.w(AUTH_TOKEN_LOG_TAG, "UnauthorizedError: $message")
+                                        val text = context.getString(R.string.auth_token_unauthorized_error)
+                                        mainHandler.post { loadState = MapLoadState.Error("$text\n($message)") }
+                                    },
+                                    protectedMapOptionsJson = protectedMap?.toJson(),
                                     notifyPoiClick = { payload ->
                                         if (reactsToPoiClicks) {
                                             mainHandler.post {
@@ -441,16 +459,18 @@ fun FeatureMapScreen(
                             }
 
                             val encodedBaseUrl = URLEncoder.encode(currentBaseUrl, "UTF-8")
-                            loadUrl(
-                                "https://$ASSET_LOADER_DOMAIN/assets/www/index.html" +
-                                    "?vg_maphash=$mapHash&baseUrl=$encodedBaseUrl" +
+                            val query = if (protectedMap != null) {
+                                "?protected=true"
+                            } else {
+                                "?vg_maphash=$mapHash&baseUrl=$encodedBaseUrl" +
                                     (if (enableShadows) "&enableShadows=true" else "") +
                                     if (requestedCameraProjection != DEFAULT_CAMERA_PROJECTION) {
                                         "&cameraProjection=$requestedCameraProjection"
                                     } else {
                                         ""
-                                    },
-                            )
+                                    }
+                            }
+                            loadUrl("https://$ASSET_LOADER_DOMAIN/assets/www/index.html$query")
                         }.also { webView = it }
                     },
                     onRelease = { it.destroy() },
@@ -522,9 +542,13 @@ fun FeatureMapScreen(
     }
 }
 
+private const val AUTH_TOKEN_LOG_TAG = "AuthToken"
+
 private class MapBridge(
     private val onReady: () -> Unit,
     private val onError: (String) -> Unit,
+    private val onAuthorizationError: (String) -> Unit,
+    private val protectedMapOptionsJson: String?,
     private val notifyPoiClick: (String) -> Unit,
     private val notifyFloorsReady: (String) -> Unit,
     private val notifyFloorChanged: (String?) -> Unit,
@@ -552,6 +576,12 @@ private class MapBridge(
 
     @JavascriptInterface
     fun onMapError(message: String) = onError(message)
+
+    @JavascriptInterface
+    fun onAuthorizationError(message: String) = onAuthorizationError.invoke(message)
+
+    @JavascriptInterface
+    fun getProtectedMapOptions(): String = protectedMapOptionsJson ?: "{}"
 
     @JavascriptInterface
     fun onPoiClick(payload: String) = notifyPoiClick(payload)

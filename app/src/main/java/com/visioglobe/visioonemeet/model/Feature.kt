@@ -154,6 +154,11 @@ enum class Feature(
         titleRes = R.string.feature_camera_showcase_carousel_title,
         descriptionRes = R.string.feature_camera_showcase_carousel_description,
     ),
+    AuthToken(
+        slug = "auth-token",
+        titleRes = R.string.feature_auth_token_title,
+        descriptionRes = R.string.feature_auth_token_description,
+    ),
     ;
 
     companion object {

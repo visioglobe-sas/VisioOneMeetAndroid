@@ -73,6 +73,7 @@ Each feature below is a self-contained screen in the app demonstrating one Visio
 - [Accuracy Circle Style](docs/features/accuracy-circle-style.md) — recolor the tracked position's precision circle live via `view.updatePositionTrackerGraphicOptions()`, with the circle's radius set per `view.injectTrackedPosition()` call.
 - [Camera Projection](docs/features/camera-projection-toggle.md) — switch between a 3D perspective and a flat orthographic camera via `createView()`'s `cameraProjection` option (creation-time only, read back from `view.cameraProjection`), recreating the map on each switch.
 - [Camera Showcase](docs/features/camera-showcase-carousel.md) — run an endless automatic camera tour of the map for kiosks via chained `view.goToFloor()`/`view.goToPOI()` `AnimationPromise`s, pausing in place on any touch (zero-length `view.goToViewpoint()`) and resuming after 10 s idle.
+- [Protected Map (token)](docs/features/auth-token.md) — **code sample** (placeholder values, no protected demo map): load a map protected by an authorization token via `loadVenue()`'s `authorizationToken` + `baseURL` options, refresh it via `venue.setAuthorizationToken()`, and report an `UnauthorizedError` apart from other load errors.
 
 ## How it works
 
