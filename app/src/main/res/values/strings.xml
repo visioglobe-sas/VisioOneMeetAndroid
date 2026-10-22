@@ -92,4 +92,8 @@
     <string name="feature_auth_token_description">Code sample: load a map protected by an authorization token</string>
     <string name="auth_token_sample_text">This feature is a code sample only: this demo has no protected map to load. See app/src/main/java/com/visioglobe/visioonemeet/sample/ProtectedMapSample.kt, loadProtectedVenue in web/src/main.js and docs/features/auth-token.md, then replace the placeholder map hash and token with your own values.</string>
     <string name="auth_token_unauthorized_error">Authorization token invalid, expired or missing.</string>
+    <!-- Default values of feature input fields (demo texts). -->
+    <string name="dynamic_poi_default_label">Demo POI</string>
+    <string name="custom_text_label_default_text">Lunch 12:00–14:00</string>
+    <string name="html_marker_default_text">Open now · 12:00–14:00</string>
 </resources>

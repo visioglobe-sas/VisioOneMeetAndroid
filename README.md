@@ -14,15 +14,17 @@ Use this repo as a starting point for embedding VisioOne in your own native Andr
 
 ### Configure your map
 
-Set your own map hash in `app/src/main/java/com/visioglobe/visioonemeet/MainActivity.kt`:
+Set your own map hash in `app/src/main/java/com/visioglobe/visioonemeet/model/DemoMap.kt`:
 
 ```kotlin
-private const val DEFAULT_MAP_HASH = "kbae8e6c066cca4b02c2afac2bc963a643d87437a"
+const val MAP_HASH = "kbae8e6c066cca4b02c2afac2bc963a643d87437a"
 ```
+
+The same file holds every demo POI id the feature screens prefill their input fields with (`GOTO_POI_ID`, `ITINERARY_FROM`/`ITINERARY_TO`, `TRACKING_FROM`/`TRACKING_TO`, `GEOFENCE_ZONE_ID`, `ANCHOR_POI_ID`, `CAROUSEL_STOP_IDS`...): they are ids of Visioglobe's shared demo map, so replace them with ids of your own map too.
 
 The hash is passed to the web bundle as a URL query param (`index.html?vg_maphash=...`, the same name as the SDK's `LoadOptions.vg_maphash`), so switching maps only means changing this constant — it does not require rebuilding the web bundle.
 
-The [Custom Data](docs/features/custom-data.md) screen is the one exception: it always loads its own dedicated map hash regardless of `DEFAULT_MAP_HASH`, because the venue above has no CustomData published — see that feature's doc for why and which hash.
+The [Custom Data](docs/features/custom-data.md) screen is the one exception: it always loads its own dedicated map hash regardless of `MAP_HASH` (`CUSTOM_DATA_MAP_HASH`, same file), because the venue above has no CustomData published — see that feature's doc for why and which hash.
 
 ### Build, install & run
 
