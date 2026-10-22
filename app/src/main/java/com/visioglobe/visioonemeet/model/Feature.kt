@@ -149,6 +149,11 @@ enum class Feature(
         titleRes = R.string.feature_camera_projection_toggle_title,
         descriptionRes = R.string.feature_camera_projection_toggle_description,
     ),
+    CameraShowcaseCarousel(
+        slug = "camera-showcase-carousel",
+        titleRes = R.string.feature_camera_showcase_carousel_title,
+        descriptionRes = R.string.feature_camera_showcase_carousel_description,
+    ),
     ;
 
     companion object {

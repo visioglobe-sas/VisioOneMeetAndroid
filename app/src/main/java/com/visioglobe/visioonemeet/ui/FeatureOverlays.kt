@@ -3188,3 +3188,94 @@ fun CameraProjectionToggleOverlay(
         )
     }
 }
+
+// --- camera-showcase-carousel ---
+
+/**
+ * Snapshot of the `camera-showcase-carousel` tour, pushed by the web page via
+ * `AndroidBridge.onCarouselStateChanged` on every change — Start/Stop, but also a touch on the map
+ * (pause) and the idle timer (resume), which happen with the sheet closed. [state] is `running`,
+ * `paused` or `stopped`; [stopIndex] (0-based) / [poiId] is the stop in flight while running, or
+ * the stop the tour resumes from while paused. See docs/features/camera-showcase-carousel.md.
+ */
+data class CarouselState(
+    val state: String = "stopped",
+    val stopIndex: Int = 0,
+    val stopCount: Int = 0,
+    val poiId: String = "",
+    val resumeAfterMs: Long = 10_000,
+)
+
+internal fun parseCarouselStatePayload(json: String): CarouselState {
+    val obj = JSONObject(json)
+    return CarouselState(
+        state = obj.optString("state", "stopped"),
+        stopIndex = obj.optInt("stopIndex", 0),
+        stopCount = obj.optInt("stopCount", 0),
+        poiId = obj.optString("poiId", ""),
+        resumeAfterMs = obj.optLong("resumeAfterMs", 10_000),
+    )
+}
+
+/** Starts (or resumes right away) the tour — the loop itself runs in the web page, see web/src/main.js. */
+private fun WebView.carouselStart() {
+    evaluateJavascript("window.MapBridge.carouselStart()", null)
+}
+
+/** Stops scheduling hops; the hop in flight, if any, ends on its own. */
+private fun WebView.carouselStop() {
+    evaluateJavascript("window.MapBridge.carouselStop()", null)
+}
+
+/**
+ * FAB-triggered control for `camera-showcase-carousel`: a Start/Stop button, a status line and a
+ * one-line hint. It holds no state of its own: the tour loop lives in the web page, and the sheet
+ * renders [carouselState] (screen-level, see `FeatureBridgeState`), so it shows the right status
+ * when reopened after a touch paused the tour or the idle timer resumed it with the sheet closed.
+ * See docs/features/camera-showcase-carousel.md.
+ */
+@Composable
+fun CameraShowcaseCarouselOverlay(webView: WebView?, carouselState: CarouselState) {
+    val isStopped = carouselState.state == "stopped"
+    Column(modifier = Modifier.padding(16.dp)) {
+        if (isStopped) {
+            Button(
+                onClick = { webView?.carouselStart() },
+                enabled = webView != null,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(stringResource(R.string.carousel_start))
+            }
+        } else {
+            OutlinedButton(
+                onClick = { webView?.carouselStop() },
+                enabled = webView != null,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(stringResource(R.string.carousel_stop))
+            }
+        }
+        Spacer(modifier = Modifier.height(12.dp))
+        Text(
+            text = when (carouselState.state) {
+                "running" -> stringResource(
+                    R.string.carousel_status_running,
+                    carouselState.stopIndex + 1,
+                    carouselState.stopCount,
+                    carouselState.poiId,
+                )
+                "paused" -> stringResource(
+                    R.string.carousel_status_paused,
+                    (carouselState.resumeAfterMs / 1000).toInt(),
+                )
+                else -> stringResource(R.string.carousel_status_stopped)
+            },
+            style = MaterialTheme.typography.bodyLarge,
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = stringResource(R.string.carousel_hint),
+            style = MaterialTheme.typography.bodySmall,
+        )
+    }
+}

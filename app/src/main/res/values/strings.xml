@@ -80,4 +80,12 @@
     <string name="camera_projection_option_perspective">Perspective</string>
     <string name="camera_projection_option_orthographic">Orthographic</string>
     <string name="camera_projection_hint">Switching reloads the map (the projection can only be set when the view is created).</string>
+    <string name="feature_camera_showcase_carousel_title">Camera showcase</string>
+    <string name="feature_camera_showcase_carousel_description">Automatic camera tour of the map, for kiosks and lobby screens</string>
+    <string name="carousel_start">Start</string>
+    <string name="carousel_stop">Stop</string>
+    <string name="carousel_status_running">Running — stop %1$d/%2$d: %3$s</string>
+    <string name="carousel_status_paused">Paused — resumes after %1$d s without touch</string>
+    <string name="carousel_status_stopped">Stopped</string>
+    <string name="carousel_hint">Touching the map pauses the tour; it resumes on its own after 10 s.</string>
 </resources>
