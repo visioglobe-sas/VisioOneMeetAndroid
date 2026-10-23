@@ -12,6 +12,7 @@ import androidx.compose.ui.Modifier
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.visioglobe.visioonemeet.model.DemoMap
 import com.visioglobe.visioonemeet.model.Feature
 import com.visioglobe.visioonemeet.ui.AccessibleModeOverlay
 import com.visioglobe.visioonemeet.ui.AccuracyCircleStyleOverlay
@@ -54,16 +55,6 @@ import com.visioglobe.visioonemeet.ui.accuracyCircleStyleSession
 import com.visioglobe.visioonemeet.ui.setUiPartVisible
 import com.visioglobe.visioonemeet.ui.theme.VisioOneMeetTheme
 
-/** Hash of the VisioOne map to display, as found on the my.visioglobe.com portal. */
-private const val DEFAULT_MAP_HASH = "kbae8e6c066cca4b02c2afac2bc963a643d87437a"
-
-/**
- * Dedicated map hash used only by [Feature.CustomData], which needs a venue with real published
- * CustomData to demonstrate anything beyond the empty state — [DEFAULT_MAP_HASH] has none. See
- * docs/features/custom-data.md.
- */
-private const val CUSTOM_DATA_MAP_HASH = "kd9426d8cb3f1c532f22b5bcbd325c280bd351feb"
-
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -100,12 +91,15 @@ class MainActivity : ComponentActivity() {
                             if (feature == Feature.AccuracyCircleStyle) {
                                 accuracyCircleStyleSession()
                             } else {
-                                TrackedPositionSession()
+                                TrackedPositionSession(
+                                    initialOriginId = DemoMap.TRACKING_FROM,
+                                    initialDestinationId = DemoMap.TRACKING_TO,
+                                )
                             }
                         }
                         val geofencingSession = remember { GeofencingSession(trackedPositionSession) }
                         FeatureMapScreen(
-                            mapHash = if (feature == Feature.CustomData) CUSTOM_DATA_MAP_HASH else DEFAULT_MAP_HASH,
+                            mapHash = if (feature == Feature.CustomData) DemoMap.CUSTOM_DATA_MAP_HASH else DemoMap.MAP_HASH,
                             titleRes = feature?.titleRes,
                             modifier = Modifier.fillMaxSize(),
                             reactsToPoiClicks = feature == Feature.PoiClick,

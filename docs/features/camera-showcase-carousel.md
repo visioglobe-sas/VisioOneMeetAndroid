@@ -74,7 +74,10 @@ Signatures (SDK 1.1.0 typings):
 Native side (Kotlin): two commands, and one callback that reports every state change. A state change can also happen in the page on its own, after a touch or when the idle timer fires, so the native UI should render the last reported snapshot rather than keep its own copy:
 
 ```kotlin
-webView.evaluateJavascript("window.MapBridge.carouselStart()", null) // from the first stop, or right away when paused
+// The stop POI ids live on the native side (DemoMap.CAROUSEL_STOP_IDS in model/DemoMap.kt) and are
+// passed on Start; the page keeps them as its STOPS list.
+val stops = JSONArray(listOf("B4-UL00-ID0009", "B1-LL01-ID0152", "B3-UL00-ID0064", "B4-UL03-ID0015"))
+webView.evaluateJavascript("window.MapBridge.carouselStart($stops)", null) // from the first stop, or right away when paused
 webView.evaluateJavascript("window.MapBridge.carouselStop()", null)
 
 class MapBridge(private val onCarouselState: (String) -> Unit /* , ... */) {

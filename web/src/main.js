@@ -1,11 +1,11 @@
 import { createVisioOne } from '@visioglobe/visioone';
 
-// The Android app appends ?vg_maphash=<mapHash> when it loads this page (see
-// FeatureMapScreen.kt), so the same bundle can display any map without a rebuild.
+// The Android app always appends ?vg_maphash=<mapHash> when it loads this page (see
+// FeatureMapScreen.kt; the hash itself is DemoMap.MAP_HASH in model/DemoMap.kt), so the
+// same bundle can display any map without a rebuild and there is no second copy here.
 // `vg_maphash` is also the page-URL parameter the SDK (>= 1.0.6) itself reads to
 // override `LoadOptions.vg_maphash`, so both always agree.
-const DEFAULT_HASH = 'kbae8e6c066cca4b02c2afac2bc963a643d87437a';
-const hash = new URLSearchParams(window.location.search).get('vg_maphash') || DEFAULT_HASH;
+const hash = new URLSearchParams(window.location.search).get('vg_maphash');
 
 // `custom-base-url`: the SDK's own default `LoadOptions.baseURL` (confirmed by reading the SDK
 // source), used whenever the app doesn't append a `?baseUrl=` override (every screen except that
@@ -232,7 +232,9 @@ function reportThemeState(status, extra) {
 // is pushed to native via AndroidBridge.onCarouselStateChanged, so the sheet
 // renders from that snapshot whenever it reopens. See
 // docs/features/camera-showcase-carousel.md.
-const CAROUSEL_STOP_POI_IDS = ['B4-UL00-ID0009', 'B1-LL01-ID0152', 'B3-UL00-ID0064', 'B4-UL03-ID0015'];
+// The stops (POI ids) are passed by native on Start (DemoMap.CAROUSEL_STOP_IDS in
+// model/DemoMap.kt), so the list lives in one place.
+let carouselStopPoiIds = [];
 const CAROUSEL_FLOOR_DURATION_MS = 800;
 const CAROUSEL_POI_DURATION_MS = 2500;
 const CAROUSEL_DWELL_MS = 3000;
@@ -254,8 +256,8 @@ function reportCarouselState() {
     JSON.stringify({
       state: carouselState,
       stopIndex: carouselStopIndex,
-      stopCount: CAROUSEL_STOP_POI_IDS.length,
-      poiId: CAROUSEL_STOP_POI_IDS[carouselStopIndex],
+      stopCount: carouselStopPoiIds.length,
+      poiId: carouselStopPoiIds[carouselStopIndex],
       resumeAfterMs: CAROUSEL_RESUME_AFTER_MS,
     }),
   );
@@ -282,7 +284,7 @@ async function carouselAwait(animation, generation) {
 
 async function runCarousel(generation) {
   while (generation === carouselGeneration) {
-    const poi = venue.pois.find((p) => p.id === CAROUSEL_STOP_POI_IDS[carouselStopIndex]);
+    const poi = venue.pois.find((p) => p.id === carouselStopPoiIds[carouselStopIndex]);
     if (poi) {
       reportCarouselState();
       // goToPOI's own doc: the caller must goToFloor first when the POI is on
@@ -304,7 +306,7 @@ async function runCarousel(generation) {
       await carouselDelay(CAROUSEL_DWELL_MS);
       if (generation !== carouselGeneration) return;
     }
-    carouselStopIndex = (carouselStopIndex + 1) % CAROUSEL_STOP_POI_IDS.length;
+    carouselStopIndex = (carouselStopIndex + 1) % carouselStopPoiIds.length;
   }
 }
 
@@ -352,7 +354,7 @@ function startCarousel() {
 function pauseCarousel() {
   carouselGeneration++;
   interruptCarouselAnimation();
-  carouselStopIndex = (carouselStopIndex + 1) % CAROUSEL_STOP_POI_IDS.length;
+  carouselStopIndex = (carouselStopIndex + 1) % carouselStopPoiIds.length;
   carouselState = 'paused';
   scheduleCarouselResume();
   reportCarouselState();
@@ -398,8 +400,10 @@ window.MapBridge = {
   // right away from the next stop while paused. A no-op while already
   // running, so a double tap never starts a second loop. See the carousel
   // block above and docs/features/camera-showcase-carousel.md.
-  carouselStart() {
+  carouselStart(stopPoiIds) {
     if (!venue || !view || carouselState === 'running') return;
+    if (Array.isArray(stopPoiIds) && stopPoiIds.length) carouselStopPoiIds = stopPoiIds;
+    if (!carouselStopPoiIds.length) return;
     if (carouselState === 'stopped') carouselStopIndex = 0;
     installCarouselTouchListener();
     startCarousel();

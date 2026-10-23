@@ -46,6 +46,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.core.graphics.toColorInt
 import com.visioglobe.visioonemeet.R
+import com.visioglobe.visioonemeet.model.DemoMap
 import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -720,7 +721,7 @@ fun ResetViewOverlay(webView: WebView?) {
 
 @Composable
 fun OccupancySimulationOverlay(webView: WebView?) {
-    var placeId by remember { mutableStateOf("") }
+    var placeId by remember { mutableStateOf(DemoMap.OCCUPANCY_PLACE_ID) }
     var simulatingOccupancy by remember { mutableStateOf(false) }
 
     Row(
@@ -771,7 +772,7 @@ fun OccupancySimulationOverlay(webView: WebView?) {
  */
 @Composable
 fun GoToPoiOverlay(webView: WebView?) {
-    var placeId by remember { mutableStateOf("") }
+    var placeId by remember { mutableStateOf(DemoMap.GOTO_POI_ID) }
 
     Row(
         modifier = Modifier
@@ -853,8 +854,8 @@ fun FloorSelectorOverlay(webView: WebView?, floorSelector: FloorSelectorState) {
  */
 @Composable
 fun ComputeNavigationOverlay(webView: WebView?, navigationError: String?) {
-    var origin by remember { mutableStateOf("") }
-    var destination by remember { mutableStateOf("") }
+    var origin by remember { mutableStateOf(DemoMap.ITINERARY_FROM) }
+    var destination by remember { mutableStateOf(DemoMap.ITINERARY_TO) }
 
     Column(
         modifier = Modifier
@@ -913,8 +914,8 @@ fun ComputeNavigationOverlay(webView: WebView?, navigationError: String?) {
  */
 @Composable
 fun CustomNavigationTraceOverlay(webView: WebView?, navigationError: String?) {
-    var origin by remember { mutableStateOf("") }
-    var destination by remember { mutableStateOf("") }
+    var origin by remember { mutableStateOf(DemoMap.ITINERARY_FROM) }
+    var destination by remember { mutableStateOf(DemoMap.ITINERARY_TO) }
     var selectedPresetKey by remember { mutableStateOf(NAVIGATION_TRACE_PRESETS.keys.first()) }
 
     Column(
@@ -1003,8 +1004,8 @@ fun CustomNavigationTraceOverlay(webView: WebView?, navigationError: String?) {
  */
 @Composable
 fun NavigationExcludeModalitiesOverlay(webView: WebView?, navigationError: String?) {
-    var origin by remember { mutableStateOf("") }
-    var destination by remember { mutableStateOf("") }
+    var origin by remember { mutableStateOf(DemoMap.EXCLUDE_MODALITIES_FROM) }
+    var destination by remember { mutableStateOf(DemoMap.EXCLUDE_MODALITIES_TO) }
     var excludeElevator by remember { mutableStateOf(false) }
 
     Column(
@@ -1082,8 +1083,8 @@ fun NavigationExcludeModalitiesOverlay(webView: WebView?, navigationError: Strin
  */
 @Composable
 fun AccessibleModeOverlay(webView: WebView?, navigationError: String?) {
-    var origin by remember { mutableStateOf("") }
-    var destination by remember { mutableStateOf("") }
+    var origin by remember { mutableStateOf(DemoMap.ACCESSIBLE_FROM) }
+    var destination by remember { mutableStateOf(DemoMap.ACCESSIBLE_TO) }
     var accessible by remember { mutableStateOf(false) }
 
     Column(
@@ -1338,10 +1339,10 @@ class TrackedPositionSession(
     }
 }
 
-/** [TrackedPositionSession] pre-filled for `accuracy-circle-style` (two demo-map POIs, 6 m radius). */
+/** [TrackedPositionSession] pre-filled for `accuracy-circle-style` (the demo walk, 6 m radius). */
 fun accuracyCircleStyleSession() = TrackedPositionSession(
-    initialOriginId = ACCURACY_CIRCLE_STYLE_ORIGIN_ID,
-    initialDestinationId = ACCURACY_CIRCLE_STYLE_DESTINATION_ID,
+    initialOriginId = DemoMap.TRACKING_FROM,
+    initialDestinationId = DemoMap.TRACKING_TO,
     initialRadiusMeters = ACCURACY_CIRCLE_STYLE_DEFAULT_RADIUS_METERS,
 )
 
@@ -1540,9 +1541,6 @@ private const val POSITION_TRACKER_DEFAULT_OPACITY = 0.3f
 private const val POSITION_TRACKER_MIN_OPACITY = 0.1f
 private const val POSITION_TRACKER_MAX_OPACITY = 1f
 
-/** Pre-filled origin/destination, verified to start fine on the shared demo map. */
-private const val ACCURACY_CIRCLE_STYLE_ORIGIN_ID = "B4-UL00-ID0009"
-private const val ACCURACY_CIRCLE_STYLE_DESTINATION_ID = "B4-UL00-ID0010"
 private const val ACCURACY_CIRCLE_STYLE_DEFAULT_RADIUS_METERS = 6f
 
 /** Color presets offered for the tracked position (hex, label resource). */
@@ -1632,7 +1630,7 @@ fun AccuracyCircleStyleOverlay(
  */
 @Composable
 fun ClickableSurfaceOverlay(webView: WebView?) {
-    var placeId by remember { mutableStateOf("") }
+    var placeId by remember { mutableStateOf(DemoMap.CLICKABLE_SURFACE_PLACE_ID) }
 
     Row(
         modifier = Modifier
@@ -1664,18 +1662,10 @@ fun ClickableSurfaceOverlay(webView: WebView?) {
 }
 
 /**
- * Place IDs confirmed (via a direct query against the venue behind [CUSTOM_DATA_MAP_HASH] in
- * `MainActivity.kt`) to carry real, non-empty CustomData — offered as quick-select chips in
- * [CustomDataOverlay] so trying the feature doesn't require knowing a valid POI id upfront. See
- * docs/features/custom-data.md.
- */
-private val CUSTOM_DATA_SAMPLE_PLACE_IDS = listOf("B1", "B3-UL00-ID0065", "B3-UL00-ID0064")
-
-/**
  * FAB-triggered control for `custom-data`: a Place ID field plus a single "Load" button that calls
  * [WebView.loadCustomData] — combining `venue.refreshCustomData()` and `venue.getPOICustomData()`
  * into one round trip, since a demo has no reason to expose them as two separate steps. Above the
- * field, one chip per [CUSTOM_DATA_SAMPLE_PLACE_IDS] entry fills it and immediately triggers Load,
+ * field, one chip per [DemoMap.CUSTOM_DATA_SAMPLE_PLACE_IDS] entry fills it and immediately triggers Load,
  * since free-typing a valid id is otherwise guesswork; the field still accepts free-text entry for
  * any other id. `requestId` guards against a stale response overwriting a more recent request's
  * outcome, same pattern as [TrackedPositionSimulationControls]. All three outcomes are rendered as
@@ -1685,7 +1675,7 @@ private val CUSTOM_DATA_SAMPLE_PLACE_IDS = listOf("B1", "B3-UL00-ID0065", "B3-UL
  */
 @Composable
 fun CustomDataOverlay(webView: WebView?, customDataLoaded: CustomDataResult?) {
-    var placeId by remember { mutableStateOf("") }
+    var placeId by remember { mutableStateOf(DemoMap.CUSTOM_DATA_PLACE_ID) }
     var pendingRequestId by remember { mutableStateOf<Int?>(null) }
     var nextRequestId by remember { mutableStateOf(0) }
     var result by remember { mutableStateOf<Map<String, String>?>(null) }
@@ -1715,7 +1705,7 @@ fun CustomDataOverlay(webView: WebView?, customDataLoaded: CustomDataResult?) {
         Text("Known POIs with real data:", style = MaterialTheme.typography.bodySmall)
         Spacer(modifier = Modifier.height(4.dp))
         FlowRow(modifier = Modifier.fillMaxWidth()) {
-            CUSTOM_DATA_SAMPLE_PLACE_IDS.forEach { sampleId ->
+            DemoMap.CUSTOM_DATA_SAMPLE_PLACE_IDS.forEach { sampleId ->
                 OutlinedButton(
                     onClick = {
                         placeId = sampleId
@@ -1866,9 +1856,10 @@ private fun DynamicPoiCreationResult.errorMessageOrNull(): String? = when (statu
  */
 @Composable
 fun DynamicPoiCrudOverlay(webView: WebView?, dynamicPoiCreated: DynamicPoiCreationResult?) {
-    var newId by remember { mutableStateOf("") }
-    var anchorId by remember { mutableStateOf("") }
-    var labelText by remember { mutableStateOf("") }
+    var newId by remember { mutableStateOf(DemoMap.DYNAMIC_POI_NEW_ID) }
+    var anchorId by remember { mutableStateOf(DemoMap.ANCHOR_POI_ID) }
+    val defaultLabelText = stringResource(R.string.dynamic_poi_default_label)
+    var labelText by remember { mutableStateOf(defaultLabelText) }
     var trackedPoiId by remember { mutableStateOf<String?>(null) }
     var trackedLabelText by remember { mutableStateOf<String?>(null) }
     var pendingRequestId by remember { mutableStateOf<Int?>(null) }
@@ -2203,7 +2194,7 @@ fun AddLocaleOverlay(webView: WebView?, addLocaleResolved: AddLocaleResult?) {
  */
 @Stable
 class GeofencingSession(val tracking: TrackedPositionSession = TrackedPositionSession()) {
-    var zoneId by mutableStateOf("")
+    var zoneId by mutableStateOf(DemoMap.GEOFENCE_ZONE_ID)
     var zoneErrorMessage by mutableStateOf<String?>(null)
         private set
     private var pendingZoneRequestId: Int? = null
@@ -2346,7 +2337,7 @@ fun CustomBaseUrlOverlay(currentBaseUrl: String, onReload: (String) -> Unit) {
  * Prefilled anchor POI for `3d-icon-marker`: a POI of the shared demo map that has a label to copy
  * a position from ("Restaurant", B4 ground floor). See docs/features/3d-icon-marker.md.
  */
-private const val ICON_MARKER_DEFAULT_ANCHOR_ID = "B4-UL00-ID0009"
+private const val ICON_MARKER_DEFAULT_ANCHOR_ID = DemoMap.ANCHOR_POI_ID
 
 /**
  * The single image id this demo places under on the JS side — only one icon at a time, a
@@ -2526,8 +2517,6 @@ fun IconMarker3dOverlay(webView: WebView?, iconImagePlaced: IconImagePlacementRe
  */
 private const val TEXT_LABEL_DEFAULT_ANCHOR_ID = ICON_MARKER_DEFAULT_ANCHOR_ID
 
-private const val TEXT_LABEL_DEFAULT_TEXT = "Lunch 12:00–14:00"
-
 /** Font colors offered for the label (hex — the SDK only accepts hex / `rgb()` / `hsl()`). */
 private val TEXT_LABEL_COLORS = listOf(
     "#E53935" to "Red",
@@ -2638,7 +2627,8 @@ internal fun parseTextLabelPlacementPayload(requestId: Int, json: String): TextL
 @Composable
 fun CustomTextLabelOverlay(webView: WebView?, textLabelPlaced: TextLabelPlacementResult?) {
     var anchorId by remember { mutableStateOf(TEXT_LABEL_DEFAULT_ANCHOR_ID) }
-    var text by remember { mutableStateOf(TEXT_LABEL_DEFAULT_TEXT) }
+    val defaultText = stringResource(R.string.custom_text_label_default_text)
+    var text by remember { mutableStateOf(defaultText) }
     var color by remember { mutableStateOf(TEXT_LABEL_COLORS.first().first) }
     var size by remember { mutableStateOf(TEXT_LABEL_SIZES[1]) }
     var rotation by remember { mutableIntStateOf(TEXT_LABEL_ROTATIONS.first()) }
@@ -2815,8 +2805,6 @@ fun CustomTextLabelOverlay(webView: WebView?, textLabelPlaced: TextLabelPlacemen
  */
 private const val HTML_MARKER_DEFAULT_ANCHOR_ID = TEXT_LABEL_DEFAULT_ANCHOR_ID
 
-private const val HTML_MARKER_DEFAULT_TEXT = "Open now · 12:00–14:00"
-
 /**
  * Pins the demo HTML badge on [anchorId] by calling `window.MapBridge.placeHtmlMarker` in the
  * WebView (`venue.createMarker` under the hood, with a `div` element the bridge JS builds). The
@@ -2892,7 +2880,8 @@ internal fun parseHtmlMarkerStatePayload(json: String): HtmlMarkerState {
 @Composable
 fun HtmlOverlayMarkerOverlay(webView: WebView?, htmlMarkerState: HtmlMarkerState?) {
     var anchorId by remember { mutableStateOf(HTML_MARKER_DEFAULT_ANCHOR_ID) }
-    var text by remember { mutableStateOf(HTML_MARKER_DEFAULT_TEXT) }
+    val defaultText = stringResource(R.string.html_marker_default_text)
+    var text by remember { mutableStateOf(defaultText) }
     val placedOnPoiId = htmlMarkerState?.placedOnPoiId
     val isVisible = htmlMarkerState?.isVisible ?: true
 
@@ -3217,9 +3206,13 @@ internal fun parseCarouselStatePayload(json: String): CarouselState {
     )
 }
 
-/** Starts (or resumes right away) the tour — the loop itself runs in the web page, see web/src/main.js. */
+/**
+ * Starts (or resumes right away) the tour over [DemoMap.CAROUSEL_STOP_IDS] — the loop itself runs
+ * in the web page, see web/src/main.js.
+ */
 private fun WebView.carouselStart() {
-    evaluateJavascript("window.MapBridge.carouselStart()", null)
+    val stopIds = JSONArray(DemoMap.CAROUSEL_STOP_IDS)
+    evaluateJavascript("window.MapBridge.carouselStart($stopIds)", null)
 }
 
 /** Stops scheduling hops; the hop in flight, if any, ends on its own. */
