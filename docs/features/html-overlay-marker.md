@@ -6,21 +6,26 @@ Pins a regular HTML element — here a small "Open now · 12:00–14:00" badge �
 
 In a WebView-based Android app the element lives in the WebView's DOM: the bridge JS creates it, and forwards taps on it to Kotlin through the `@JavascriptInterface` bridge.
 
-The marker is owned by an existing "anchor" POI and placed next to that POI's own position — copied from its first label/marker/image, the same approach `dynamic-poi-crud.md`, `3d-icon-marker.md` and `custom-text-label.md` use, then offset by ~4 m.
+The marker is owned by an existing "anchor" POI and placed next to that POI's own position — copied with the shared `poiDisplayPosition` helper (first label, else first image or marker, else the centroid of its first surface — see `simulated-position.md`), the same approach `dynamic-poi-crud.md`, `3d-icon-marker.md` and `custom-text-label.md` use, then offset by ~4 m.
 
 ## SDK usage
 
 ```js
 // web/src/main.js
 
-// POIs carry no direct lat/lng field: read it off an attached visual element,
-// skipping our own label/marker (both end up attached to the anchor POI).
-function anchorPositionOf(poi, excludedLabel = null, excludedMarker = null) {
-  return (
-    poi.labels.find((label) => label !== excludedLabel)?.position ??
-    poi.markers.find((marker) => marker !== excludedMarker)?.position ??
-    poi.images[0]?.position
-  );
+// POIs carry no direct lat/lng field. One helper gives a POI's display position:
+// its first label's position, else its first image's or marker's, else the
+// centroid of its first surface's outline. `excluded` skips our own objects.
+function poiDisplayPosition(poi, excluded = []) {
+  const first = (items) => items?.find((item) => !excluded.includes(item))?.position;
+  const position = first(poi.labels) ?? first(poi.images) ?? first(poi.markers);
+  if (position) return position;
+  const vertices = poi.surfaces?.[0]?.positions;
+  if (!vertices?.length) return undefined;
+  return {
+    latitude: vertices.reduce((sum, p) => sum + p.latitude, 0) / vertices.length,
+    longitude: vertices.reduce((sum, p) => sum + p.longitude, 0) / vertices.length,
+  };
 }
 
 let htmlMarker = null;
@@ -50,10 +55,10 @@ placeHtmlMarker(anchorId, text) {
   if (!trimmed) return reportHtmlMarkerState('text-required');
   const anchor = venue.pois.find((p) => p.id === anchorId);
   if (!anchor) return reportHtmlMarkerState('anchor-not-found');
-  const anchorPosition = anchorPositionOf(anchor, null, htmlMarker);
+  const anchorPosition = poiDisplayPosition(anchor, [htmlMarker]);
   if (!anchorPosition) return reportHtmlMarkerState('anchor-has-no-position');
 
-  window.MapBridge.removeHtmlMarker({ silent: true }); // only one marker at a time
+  removeHtmlMarkerSilently(); // only one marker at a time (venue.removeMarker)
   const position = {
     ...anchorPosition,
     latitude: anchorPosition.latitude + OFFSET,
@@ -74,7 +79,7 @@ placeHtmlMarker(anchorId, text) {
     htmlMarker = marker;
     htmlMarkerTapCount = 0;
     reportHtmlMarkerState('placed');
-    window.MapBridge.goToPlace(anchor.id); // view.goToPOI(): show the anchor's floor
+    goToPoi(anchor); // view.goToPOI(): show the anchor's floor
   } catch (error) {
     reportHtmlMarkerState('error', { message: String(error?.message ?? error) });
   }
@@ -95,22 +100,18 @@ setHtmlMarkerVisible(isVisible) {
   reportHtmlMarkerState(isVisible ? 'shown' : 'hidden');
 },
 
-removeHtmlMarker({ silent = false } = {}) {
+removeHtmlMarker() {
   if (!venue || !htmlMarker) return;
-  venue.removeMarker(htmlMarker); // also detaches the element from the DOM
-  htmlMarker = null;
-  htmlMarkerTapCount = 0;
-  if (!silent) {
-    window.MapBridge.clearPlace(); // revert goToPlace's highlight
-    reportHtmlMarkerState('removed');
-  }
+  removeHtmlMarkerSilently(); // venue.removeMarker(htmlMarker) — also detaches the element from the DOM
+  clearSelectedPoi(); // revert goToPoi's highlight
+  reportHtmlMarkerState('removed');
 },
 ```
 
 Native call sites (string arguments are JSON-quoted before being interpolated into the script):
 
 ```kotlin
-// FeatureOverlays.kt
+// app/src/main/java/com/visioglobe/visioonemeet/ui/FeatureOverlays.kt — native bridge wrappers
 private fun WebView.placeHtmlMarker(anchorId: String, text: String) {
     evaluateJavascript(
         "window.MapBridge.placeHtmlMarker(${JSONObject.quote(anchorId)}, ${JSONObject.quote(text)})",

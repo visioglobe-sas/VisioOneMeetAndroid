@@ -12,7 +12,7 @@ Switches the map's displayed language at runtime — POI/label names, and any on
 // Reports the venue's currentLocale back to native in one round trip, so the
 // runtime-locale sheet can highlight whichever option is already active when
 // it opens. There is no locale-change event to listen for instead, so this
-// is only ever called once, right when the sheet is shown. Reuses the
+// is called every time the panel opens. Reuses the
 // { status, locale } response shape of setLocale below so native can share
 // one response parser for both.
 getCurrentLocale(requestId) {
@@ -40,7 +40,7 @@ async setLocale(requestId, locale) {
 Native call sites:
 
 ```kotlin
-// FeatureOverlays.kt
+// app/src/main/java/com/visioglobe/visioonemeet/ui/FeatureOverlays.kt — native bridge wrappers
 private fun WebView.getCurrentLocale(requestId: Int) {
     val script = "window.MapBridge.getCurrentLocale($requestId)"
     evaluateJavascript(script, null)

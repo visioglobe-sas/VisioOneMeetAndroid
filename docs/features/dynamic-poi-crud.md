@@ -11,9 +11,19 @@ A bare `venue.createPOI()` has no visual representation of its own, so this demo
 ```js
 // web/src/main.js
 
-// POIs carry no direct lat/lng field: read it off an attached visual element.
-function anchorPositionOf(poi) {
-  return poi.labels[0]?.position ?? poi.markers[0]?.position ?? poi.images[0]?.position;
+// POIs carry no direct lat/lng field. One helper gives a POI's display position:
+// its first label's position, else its first image's or marker's, else the
+// centroid of its first surface's outline. `excluded` skips our own objects.
+function poiDisplayPosition(poi, excluded = []) {
+  const first = (items) => items?.find((item) => !excluded.includes(item))?.position;
+  const position = first(poi.labels) ?? first(poi.images) ?? first(poi.markers);
+  if (position) return position;
+  const vertices = poi.surfaces?.[0]?.positions;
+  if (!vertices?.length) return undefined;
+  return {
+    latitude: vertices.reduce((sum, p) => sum + p.latitude, 0) / vertices.length,
+    longitude: vertices.reduce((sum, p) => sum + p.longitude, 0) / vertices.length,
+  };
 }
 
 // The POI/Label pair created at runtime, tracked so updateDynamicPoiLabel/
@@ -31,7 +41,7 @@ createDynamicPoi(requestId, newId, anchorId, labelText) {
     report('anchor-not-found');
     return;
   }
-  const anchorPosition = anchorPositionOf(anchor);
+  const anchorPosition = poiDisplayPosition(anchor);
   if (!anchorPosition) {
     report('anchor-has-no-position');
     return;
@@ -70,7 +80,7 @@ removeDynamicPoi() {
 Native call sites:
 
 ```kotlin
-// FeatureOverlays.kt
+// app/src/main/java/com/visioglobe/visioonemeet/ui/FeatureOverlays.kt — native bridge wrappers
 private fun WebView.createDynamicPoi(requestId: Int, newId: String, anchorId: String, labelText: String) {
     val script = "window.MapBridge.createDynamicPoi(" +
         "$requestId, ${JSONObject.quote(newId)}, ${JSONObject.quote(anchorId)}, ${JSONObject.quote(labelText)})"
@@ -110,9 +120,9 @@ The SDK calls exercised:
 - **`updatePOI` cannot touch anything visual.** Its `POIUpdateOptions` has exactly one field, `categories: Category[]` — passing `[]` clears every category the POI belongs to. There is no way to move a POI, rename it, or change its visual content through `updatePOI`; that's why this demo edits the attached *Label*'s text via `updateLabel` instead to demonstrate "modifying" a dynamic POI.
 - **`removePOI` cascades to its visual elements.** Removing a POI automatically removes any Label/Image/Line/Marker/Surface attached to it from the view — there is no need to separately call `removeLabel` (or the equivalent for other element types) first.
 - **`createPOI` throws on a duplicate id, it doesn't silently overwrite.** `POIAlreadyExistsError` is thrown synchronously when `id` is already used anywhere in the venue. It's a genuinely exceptional, not-attached-to-the-DOM error class — it isn't part of this package's public exports, so catching code can't use `instanceof POIAlreadyExistsError`; this demo instead checks `error.constructor.name === 'POIAlreadyExistsError'`, since the class's name survives bundling unminified. Either way, this is a normal, expected outcome to handle (e.g. a "pick another ID" message), not a crash.
-- **POIs carry no direct lat/lng field.** Same quirk documented in `simulated-position.md`/`goto-poi.md`: a position has to be read off one of the POI's attached visual elements (`.labels[0]?.position`, `.markers[0]?.position`, `.images[0]?.position`) rather than the POI itself. This demo relies on exactly that to seed the new POI's label position from an existing "anchor" POI, and treats an anchor with none of the three as a normal "nothing to copy" state rather than crashing.
+- **POIs carry no direct lat/lng field.** Same quirk documented in `simulated-position.md`/`goto-poi.md`: a position has to be read off one of the POI's attached elements rather than the POI itself (`poiDisplayPosition`: first label, else first image or marker, else the centroid of the first surface). This demo relies on exactly that to seed the new POI's label position from an existing "anchor" POI, and treats an anchor with none of them as a normal "nothing to copy" state rather than crashing.
 
 ## Learn more
 
 - `custom-data.md` and `category-highlight.md` document the same `requestId`-echoed native↔JS round-trip pattern used here for `createDynamicPoi`.
-- `simulated-position.md` documents the same "no direct lat/lng field, read it off a label/marker/image" POI quirk, used here to resolve the anchor's position.
+- `simulated-position.md` documents the same "no direct lat/lng field" POI quirk and the `poiDisplayPosition` helper, used here to resolve the anchor's position.

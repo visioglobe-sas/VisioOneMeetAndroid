@@ -44,7 +44,7 @@ import java.net.URLEncoder
 private const val ASSET_LOADER_DOMAIN = "appassets.androidx.local"
 
 /**
- * The VisioOne SDK's own default `LoadOptions.baseURL` (confirmed by reading the SDK source) —
+ * The VisioOne SDK's own default `LoadOptions.baseURL` —
  * used here as the pre-filled value for [CustomBaseUrlOverlay], and as the query param value every
  * other screen implicitly sends, so nothing changes for them. See docs/features/custom-base-url.md.
  */
@@ -88,8 +88,8 @@ data class FeatureBridgeState(
     val zoneResolved: ZoneResolution? = null,
     val isInsideGeofenceZone: Boolean = false,
     val currentBaseUrl: String = DEFAULT_SDK_BASE_URL,
-    val iconImagePlaced: IconImagePlacementResult? = null,
-    val textLabelPlaced: TextLabelPlacementResult? = null,
+    val iconImagePlaced: PlacementResult? = null,
+    val textLabelPlaced: PlacementResult? = null,
     val htmlMarkerState: HtmlMarkerState? = null,
     val themeState: ThemeState? = null,
     val isCameraLocked: Boolean = false,
@@ -240,9 +240,9 @@ data class FeatureBridgeState(
  *
  * [screenContent] is composed for the whole lifetime of the screen, outside the bottom sheet, with
  * the same arguments as [sheetContent]. It renders nothing visible: it hosts work that must outlive
- * the sheet, which is disposed on every close — today the tracked-position simulation loop of the
- * four tracking screens (see `TrackedPositionSimulationHost`), so the simulation keeps running
- * while the sheet is closed and the visitor pans the map, and stops when the screen is left.
+ * the sheet, which is disposed on every close — the screen's loops (tracked position, occupancy)
+ * and the routing of bridge responses to the screen's state (see `FeatureScreenHost`), so nothing
+ * is lost while the sheet is closed, and everything stops when the screen is left.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -276,8 +276,8 @@ fun FeatureMapScreen(
     var zoneResolved by remember { mutableStateOf<ZoneResolution?>(null) }
     var isInsideGeofenceZone by remember { mutableStateOf(false) }
     var currentBaseUrl by remember { mutableStateOf(DEFAULT_SDK_BASE_URL) }
-    var iconImagePlaced by remember { mutableStateOf<IconImagePlacementResult?>(null) }
-    var textLabelPlaced by remember { mutableStateOf<TextLabelPlacementResult?>(null) }
+    var iconImagePlaced by remember { mutableStateOf<PlacementResult?>(null) }
+    var textLabelPlaced by remember { mutableStateOf<PlacementResult?>(null) }
     var htmlMarkerState by remember { mutableStateOf<HtmlMarkerState?>(null) }
     var themeState by remember { mutableStateOf<ThemeState?>(null) }
     var isCameraLocked by remember { mutableStateOf(false) }
@@ -424,12 +424,12 @@ fun FeatureMapScreen(
                                     },
                                     notifyIconImagePlaced = { requestId, resultJson ->
                                         mainHandler.post {
-                                            iconImagePlaced = parseIconImagePlacementPayload(requestId, resultJson)
+                                            iconImagePlaced = parsePlacementPayload(requestId, resultJson)
                                         }
                                     },
                                     notifyTextLabelPlaced = { requestId, resultJson ->
                                         mainHandler.post {
-                                            textLabelPlaced = parseTextLabelPlacementPayload(requestId, resultJson)
+                                            textLabelPlaced = parsePlacementPayload(requestId, resultJson)
                                         }
                                     },
                                     notifyHtmlMarkerStateChanged = { stateJson ->
@@ -481,7 +481,7 @@ fun FeatureMapScreen(
                 is MapLoadState.Loading -> CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
 
                 is MapLoadState.Error -> Text(
-                    text = "Impossible de charger la carte VisioOne :\n${state.message}",
+                    text = stringResource(R.string.map_load_error, state.message),
                     modifier = Modifier
                         .align(Alignment.Center)
                         .padding(24.dp),

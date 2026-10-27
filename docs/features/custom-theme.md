@@ -102,7 +102,7 @@ webView.loadUrl(
         "?vg_maphash=$mapHash&enableShadows=true",
 )
 
-// FeatureOverlays.kt
+// app/src/main/java/com/visioglobe/visioonemeet/ui/FeatureOverlays.kt — native bridge wrappers
 private fun WebView.getThemeState() {
     evaluateJavascript("window.MapBridge.getThemeState()", null)
 }

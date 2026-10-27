@@ -4,16 +4,26 @@
 
 Places a custom image (here, a small PNG icon inlined as a data URL) at a precise spot on the 3D map, e.g. a product photo above a shelf, or a business pictogram above a shop. Built on `venue.createImage()`, with `venue.updateImage()` to switch its orientation live and `venue.removeImage()` to take it down.
 
-The image is owned by an existing "anchor" POI and placed at that POI's own position — copied from its first label/marker/image, the same approach `dynamic-poi-crud.md` uses (there is no "tap the map to place a pin" UI here).
+The image is owned by an existing "anchor" POI and placed at that POI's own position — copied with the shared `poiDisplayPosition` helper (first label, else first image or marker, else the centroid of its first surface — see `simulated-position.md`), the same approach `dynamic-poi-crud.md` uses (there is no "tap the map to place a pin" UI here).
 
 ## SDK usage
 
 ```js
 // web/src/main.js
 
-// POIs carry no direct lat/lng field: read it off an attached visual element.
-function anchorPositionOf(poi) {
-  return poi.labels[0]?.position ?? poi.markers[0]?.position ?? poi.images[0]?.position;
+// POIs carry no direct lat/lng field. One helper gives a POI's display position:
+// its first label's position, else its first image's or marker's, else the
+// centroid of its first surface's outline. `excluded` skips our own objects.
+function poiDisplayPosition(poi, excluded = []) {
+  const first = (items) => items?.find((item) => !excluded.includes(item))?.position;
+  const position = first(poi.labels) ?? first(poi.images) ?? first(poi.markers);
+  if (position) return position;
+  const vertices = poi.surfaces?.[0]?.positions;
+  if (!vertices?.length) return undefined;
+  return {
+    latitude: vertices.reduce((sum, p) => sum + p.latitude, 0) / vertices.length,
+    longitude: vertices.reduce((sum, p) => sum + p.longitude, 0) / vertices.length,
+  };
 }
 
 const ICON_DATA_URL = 'data:image/png;base64,iVBORw0KGgo...';
@@ -31,12 +41,12 @@ placeIconImage(requestId, imageId, anchorId, orientationType) {
     report('anchor-not-found');
     return;
   }
-  const position = anchorPositionOf(anchor);
+  const position = poiDisplayPosition(anchor, [iconImages.get(imageId)]); // skip our own image
   if (!position) {
     report('anchor-has-no-position');
     return;
   }
-  window.MapBridge.removeIconImage(imageId); // only one image per id
+  removeIconImageById(imageId); // only one image per id (venue.removeImage)
   try {
     const image = venue.createImage({
       poi: anchor,
@@ -70,7 +80,7 @@ removeIconImage(imageId) {
 Native call sites:
 
 ```kotlin
-// FeatureOverlays.kt
+// app/src/main/java/com/visioglobe/visioonemeet/ui/FeatureOverlays.kt — native bridge wrappers
 private fun WebView.placeIconImage(requestId: Int, anchorId: String, orientationType: String) {
     val script = "window.MapBridge.placeIconImage(" +
         "$requestId, ${JSONObject.quote(ICON_MARKER_IMAGE_ID)}, ${JSONObject.quote(anchorId)}, " +
@@ -114,7 +124,7 @@ The SDK calls exercised:
 - **Data URLs work.** A base64 PNG data URL renders with no extra configuration or network request.
 - **The anchor's floor must be visible.** An image is attached to its owner POI's floor and only renders while that floor is displayed — not in the default whole-venue view. Move the camera there (e.g. `view.goToPOI(anchor)`) after placing it.
 - **Sizes are in meters.** `width`/`height` are world sizes, so the icon grows or shrinks on screen as the camera zooms. Passing only `width` to `updateImage` updates both width and height.
-- **POIs carry no direct lat/lng field.** Read the position off the anchor's `labels[0]`/`markers[0]`/`images[0]`; treat an anchor with none of them as an explicit "no position" state rather than passing `undefined` into `createImage`. Read it *before* removing/creating images on that same POI, since your own image becomes one of `anchor.images` once placed.
+- **POIs carry no direct lat/lng field.** Read the position with `poiDisplayPosition` (label, image/marker, then surface centroid); treat an anchor with none of them as an explicit "no position" state rather than passing `undefined` into `createImage`. Read it *before* removing/creating images on that same POI, since your own image becomes one of `anchor.images` once placed.
 
 ## Learn more
 

@@ -7,8 +7,7 @@ import { createVisioOne } from '@visioglobe/visioone';
 // override `LoadOptions.vg_maphash`, so both always agree.
 const hash = new URLSearchParams(window.location.search).get('vg_maphash');
 
-// `custom-base-url`: the SDK's own default `LoadOptions.baseURL` (confirmed by reading the SDK
-// source), used whenever the app doesn't append a `?baseUrl=` override (every screen except that
+// `custom-base-url`: the SDK's own default `LoadOptions.baseURL`, used whenever the app doesn't append a `?baseUrl=` override (every screen except that
 // feature's) — so this is a no-op for every other feature, not just a fallback. See
 // docs/features/custom-base-url.md.
 const DEFAULT_BASE_URL = 'https://mapserver.visioglobe.com/';
@@ -16,8 +15,9 @@ const baseURL = new URLSearchParams(window.location.search).get('baseUrl') || DE
 
 const container = document.querySelector('#content');
 
-// Optional bridge injected by MainActivity via WebView.addJavascriptInterface,
-// used to reflect the map's loading state in the native Compose UI.
+// Native bridge injected by FeatureMapScreen.kt via WebView.addJavascriptInterface:
+// the map's load state (onMapReady/onMapError) plus one callback per feature result
+// or state change (onPoiClick, onNavigationError, onCustomDataLoaded, ...).
 const bridge = window.AndroidBridge;
 
 let venue = null;
@@ -106,20 +106,29 @@ function isPositionInsidePolygon(position, polygonPositions) {
 }
 
 // POIs carry no direct lat/lng field: a position has to be read off one of
-// the POI's attached visual elements instead. Shared by createDynamicPoi
-// (dynamic-poi-crud) and placeIconImage (3d-icon-marker), which both copy
-// an existing "anchor" POI's position. Returns undefined when the POI has
-// none of the three. `excludedLabel` (optional) is skipped, so a caller whose
-// own label is still attached to the anchor (custom-text-label) never copies
-// it instead of the map's own data; `excludedMarker` (optional) does the same
-// for a caller's own marker (html-overlay-marker). See
-// docs/features/dynamic-poi-crud.md.
-function anchorPositionOf(poi, excludedLabel = null, excludedMarker = null) {
-  return (
-    poi.labels.find((label) => label !== excludedLabel)?.position ??
-    poi.markers.find((marker) => marker !== excludedMarker)?.position ??
-    poi.images[0]?.position
-  );
+// the POI's attached visual elements instead. This is the single helper every
+// feature uses to get a POI's display position (simulated-position's walk,
+// geofencing, and the anchors of dynamic-poi-crud / 3d-icon-marker /
+// custom-text-label / html-overlay-marker), always in the same order:
+//   1. its first label's `position`,
+//   2. else its first image's, then its first marker's `position`,
+//   3. else the centroid of its first surface's `positions` (the outline's
+//      vertices, averaged — accurate enough for a room-sized polygon).
+// Returns undefined when the POI has none of them. `excluded` (optional) lists
+// labels/images/markers to skip: a caller whose own object is attached to the
+// anchor POI (custom-text-label's label, html-overlay-marker's marker) never
+// copies its own position instead of the map's. See
+// docs/features/simulated-position.md.
+function poiDisplayPosition(poi, excluded = []) {
+  const first = (items) => items?.find((item) => !excluded.includes(item))?.position;
+  const position = first(poi.labels) ?? first(poi.images) ?? first(poi.markers);
+  if (position) return position;
+  const vertices = poi.surfaces?.[0]?.positions;
+  if (!vertices?.length) return undefined;
+  return {
+    latitude: vertices.reduce((sum, p) => sum + p.latitude, 0) / vertices.length,
+    longitude: vertices.reduce((sum, p) => sum + p.longitude, 0) / vertices.length,
+  };
 }
 
 // The image shown by 3d-icon-marker: a 96x96 PNG (blue disc + white star)
@@ -140,9 +149,10 @@ const iconImages = new Map();
 let customTextLabel = null;
 
 // Offset applied to the anchor POI's copied position (~4 m at the demo
-// venue's latitude), so the custom text doesn't sit on top of the map's own
-// label for that POI. See docs/features/custom-text-label.md.
-const CUSTOM_TEXT_LABEL_OFFSET = 0.00004;
+// venue's latitude), so the custom text label (custom-text-label) and the
+// HTML badge (html-overlay-marker) don't sit on top of the map's own label
+// for that POI. See docs/features/custom-text-label.md.
+const ANCHOR_OFFSET = 0.00004;
 
 // The HTML Marker placed by placeHtmlMarker (html-overlay-marker), tracked so
 // the update/visibility/remove commands know what to act on, plus how many
@@ -196,7 +206,7 @@ const enableShadows = new URLSearchParams(window.location.search).get('enableSha
 const requestedCameraProjection = new URLSearchParams(window.location.search).get('cameraProjection');
 const cameraProjection = requestedCameraProjection === 'orthographic' ? 'orthographic' : undefined;
 
-// custom-theme: the SDK defaults (View.d.ts `@defaultValue`s, and the theme a
+// custom-theme: the SDK defaults (the View typings' `@defaultValue`s, and the theme a
 // view starts with). There is no current-theme getter in the SDK, so the
 // applied theme is tracked here. See docs/features/custom-theme.md.
 const DEFAULT_THEME = 'day';
@@ -382,6 +392,93 @@ function installCarouselTouchListener() {
   });
 }
 
+// --- Helpers shared by several MapBridge commands below (called directly,
+// never through window.MapBridge, so a command never depends on `this`). ---
+
+// goto-poi: centers the camera on `poi` and highlights its surfaces (also used
+// by html-overlay-marker to bring the badge's floor into view).
+function goToPoi(poi) {
+  selectedPoi = poi;
+  view.goToPOI(poi, {
+    orientation: { pitch: 20 },
+    padding: { top: 100, right: 100, bottom: 100, left: 100 },
+  });
+  poi.surfaces.forEach((surface) => {
+    venue.updateSurface(surface, { selectionColor: view.surfaceSelectionColor });
+  });
+}
+
+function clearSelectedPoi() {
+  if (!venue || !selectedPoi) return;
+  selectedPoi.surfaces.forEach((surface) => {
+    venue.updateSurface(surface, { selectionColor: 'default' });
+  });
+  selectedPoi = null;
+}
+
+// compute-navigation and its variants: computes `request` (origin,
+// destination, isAccessible, optional excludedAttributes) and shows it as the
+// view's current trace.
+function drawNavigation(request) {
+  if (!venue || !view) return;
+  try {
+    clearNavigationTrace();
+    const navigation = venue.computeNavigation({
+      type: 'fastest',
+      firstNodeAsIntersection: false,
+      mergeFloorChangeInstructions: false,
+      ...request,
+    });
+    currentNavigationTrace = venue.createNavigationTrace(navigation);
+    view.setCurrentNavigationTrace(currentNavigationTrace);
+    bridge?.onNavigationComputed();
+  } catch (error) {
+    bridge?.onNavigationError(String(error?.message ?? error));
+  }
+}
+
+function clearNavigationTrace() {
+  if (!view || !currentNavigationTrace) return;
+  currentNavigationTrace = null;
+  view.removeCurrentNavigationTrace();
+}
+
+function clearHighlightedCategory() {
+  if (!venue || !highlightedCategoryId) return;
+  venue.pois
+    .filter((poi) => poi.categories.some((category) => category.id === highlightedCategoryId))
+    .forEach((poi) => {
+      poi.surfaces.forEach((surface) => {
+        venue.updateSurface(surface, { color: 'initial' });
+      });
+    });
+  highlightedCategoryId = null;
+}
+
+function removeIconImageById(imageId) {
+  const image = iconImages.get(imageId);
+  if (!venue || !image) return;
+  venue.removeImage(image);
+  iconImages.delete(imageId);
+}
+
+// The SDK throws "Provided label is not registered" on a second removal, so
+// the label is forgotten as soon as it is removed.
+function removeCustomTextLabel() {
+  if (!venue || !customTextLabel) return;
+  venue.removeLabel(customTextLabel);
+  customTextLabel = null;
+}
+
+// Same for markers ("Provided marker is not registered"). No state report:
+// the caller reports once itself.
+function removeHtmlMarkerSilently() {
+  if (!venue || !htmlMarker) return;
+  venue.removeMarker(htmlMarker);
+  htmlMarker = null;
+  htmlMarkerTapCount = 0;
+}
+
 // Native -> JS bridge: one method per command, called from Kotlin via
 // WebView.evaluateJavascript(). Kotlin JSON-encodes arguments before
 // interpolating them into the generated script call, so what arrives here
@@ -438,25 +535,13 @@ window.MapBridge = {
     if (!venue || !view) return;
     const poi = venue.pois.find((p) => p.id === placeId);
     if (!poi) return;
-
-    selectedPoi = poi;
-    view.goToPOI(poi, {
-      orientation: { pitch: 20 },
-      padding: { top: 100, right: 100, bottom: 100, left: 100 },
-    });
-    poi.surfaces.forEach((surface) => {
-      venue.updateSurface(surface, { selectionColor: view.surfaceSelectionColor });
-    });
+    goToPoi(poi);
   },
   // Reverts the highlight applied by goToPlace. Does not move the camera back
-  // — "Clear" only undoes the visual marker, matching the RN sibling's
-  // clearPlace (see docs/features/goto-poi.md, "Points d'attention").
+  // — "Clear" only undoes the visual marker (see docs/features/goto-poi.md,
+  // "Things to know").
   clearPlace() {
-    if (!venue || !selectedPoi) return;
-    selectedPoi.surfaces.forEach((surface) => {
-      venue.updateSurface(surface, { selectionColor: 'default' });
-    });
-    selectedPoi = null;
+    clearSelectedPoi();
   },
   // Moves the camera to the floor matching buildingId/floorId by calling
   // view.goToFloor(floor) — both ids are resolved from venue.venueLayout so a
@@ -473,86 +558,44 @@ window.MapBridge = {
   },
   // Computes a route between two POIs (given by id — `computeNavigation`
   // accepts a POI, a POI id string, or a Position, see the SDK's
-  // NavigationRequest.d.ts; ids are used here since that's all the bottom
-  // sheet's text fields collect) and draws it on the map via a
-  // NavigationTrace, same request shape as the React Native sibling's
-  // `startItinerary` (`visioOneHtml.ts`). Any previous trace is removed
-  // first so consecutive itineraries don't stack. A bad/unreachable id
-  // makes `computeNavigation` throw (see the SDK's
-  // InvalidNavigationRequestError) — caught here and reported back to
-  // native (`onNavigationError`) so the bottom sheet can show *something*
-  // went wrong, unlike the other MapBridge commands (goToPlace, goToFloor)
-  // which fail silently: those look up an id locally and no-op on a miss,
-  // whereas an invalid itinerary request would otherwise leave the user
-  // staring at an unchanged map with no clue why. `onNavigationComputed`
-  // fires on success so native can clear a previously shown error. See
+  // NavigationRequest typings; ids are used here since that's all the native
+  // From/To fields collect) and draws it on the map via a NavigationTrace.
+  // Any previous trace is removed first so consecutive itineraries don't
+  // stack. A bad/unreachable id makes `computeNavigation` throw (the SDK's
+  // InvalidNavigationRequestError) — caught and reported back to native
+  // (`onNavigationError`) so the panel can show what went wrong instead of
+  // leaving the map silently unchanged. `onNavigationComputed` fires on
+  // success so native can clear a previously shown error. See
   // docs/features/compute-navigation.md.
   computeNavigation(origin, destination, isAccessible) {
-    if (!venue || !view) return;
-    this.clearNavigation();
-    try {
-      const navigation = venue.computeNavigation({
-        origin,
-        destination,
-        isAccessible,
-        type: 'fastest',
-        firstNodeAsIntersection: false,
-        mergeFloorChangeInstructions: false,
-      });
-      currentNavigationTrace = venue.createNavigationTrace(navigation);
-      view.setCurrentNavigationTrace(currentNavigationTrace);
-      bridge?.onNavigationComputed();
-    } catch (error) {
-      bridge?.onNavigationError(String(error?.message ?? error));
-    }
+    drawNavigation({ origin, destination, isAccessible });
   },
   // Removes the trace drawn by computeNavigation, if any — a no-op
   // otherwise (e.g. called before any itinerary was computed).
+  // view.removeCurrentNavigationTrace() is the only call needed: it also
+  // unregisters the trace, so a following venue.removeNavigationTrace() on it
+  // throws "Cannot remove Navigation as it is unregistered" (and leaves the
+  // view unable to show another trace). See docs/features/compute-navigation.md.
   clearNavigation() {
-    if (!venue || !view || !currentNavigationTrace) return;
-    view.removeCurrentNavigationTrace();
-    venue.removeNavigationTrace(currentNavigationTrace);
-    currentNavigationTrace = null;
+    clearNavigationTrace();
   },
-  // `navigation-exclude-modalities`: same request shape as computeNavigation above, plus an
-  // optional `excludedAttributes` list — segment particularities (elevator/stairs/etc., see the
-  // SDK's NavigationRequest.d.ts) the computed route must avoid. On this shared demo venue the
-  // elevator segment's attribute string is 'lift' (NOT 'elevator', despite the SDK's own
-  // misleading JSDoc comment on `excludedAttributes` — confirmed live against a real venue, see
-  // docs/features/navigation-exclude-modalities.md). An empty array (excludeElevator === false)
-  // behaves exactly like a plain computeNavigation call. Reuses the same
-  // onNavigationComputed/onNavigationError reporting and try/catch as computeNavigation — a route
-  // that only exists through the excluded attribute fails the exact same way as any other
-  // unreachable pair (InvalidNavigationRequestError).
+  // `navigation-exclude-modalities`: same as computeNavigation above, plus an
+  // `excludedAttributes` list — segment particularities the computed route must
+  // avoid. On this shared demo venue the elevator segment's attribute string is
+  // 'lift' (NOT 'elevator', despite the wording of the SDK's own doc comment on
+  // `excludedAttributes` — confirmed live, see
+  // docs/features/navigation-exclude-modalities.md). An empty array
+  // (excludeElevator === false) behaves exactly like a plain computeNavigation
+  // call. A route that only exists through the excluded attribute fails like any
+  // other unreachable pair (InvalidNavigationRequestError → onNavigationError).
   computeNavigationExcludingModalities(origin, destination, isAccessible, excludeElevator) {
-    if (!venue || !view) return;
-    this.clearNavigation();
-    try {
-      const navigation = venue.computeNavigation({
-        origin,
-        destination,
-        isAccessible,
-        type: 'fastest',
-        firstNodeAsIntersection: false,
-        mergeFloorChangeInstructions: false,
-        excludedAttributes: excludeElevator ? ['lift'] : [],
-      });
-      currentNavigationTrace = venue.createNavigationTrace(navigation);
-      view.setCurrentNavigationTrace(currentNavigationTrace);
-      bridge?.onNavigationComputed();
-    } catch (error) {
-      bridge?.onNavigationError(String(error?.message ?? error));
-    }
+    drawNavigation({ origin, destination, isAccessible, excludedAttributes: excludeElevator ? ['lift'] : [] });
   },
   // `custom-navigation-trace`: restyles the trace currently drawn by
-  // computeNavigation via venue.updateNavigationTrace(trace, options) — an
-  // SDK call this bridge otherwise doesn't expose (only create/set/remove
-  // above were wired for computeNavigation). A no-op if no trace is
-  // currently displayed — colors only affect a trace that already exists,
-  // same convention as the other MapBridge commands that resolve a
-  // currently-tracked entity (clearNavigation above, clearPlace,
-  // clearZone). `options` is a NavigationTraceUpdateOptions object (colors
-  // only, see NavigationTraceUpdateOptions.d.ts): progressColor,
+  // computeNavigation via venue.updateNavigationTrace(trace, options). A no-op
+  // if no trace is currently displayed — colors only affect a trace that
+  // already exists. `options` is a NavigationTraceUpdateOptions object (colors
+  // only, see the SDK's NavigationTraceUpdateOptions typings): progressColor,
   // progressOutlineColor, progressFutureColor, previewColor,
   // previewOutlineColor.
   //
@@ -574,7 +617,7 @@ window.MapBridge = {
   // Shows/hides one of the SDK's own default UI overlays via
   // view.setUIPartVisible. uiPart is one of exactly 5 case-sensitive values
   // ('floorSelector', 'navigation', 'poiDetails', 'search', 'userTracking' —
-  // see the SDK's View.ts UIPart type); an unrecognized value is rejected by
+  // the SDK's UIPart type); an unrecognized value is rejected by
   // the SDK itself, this bridge does no validation of its own. See
   // docs/features/ui-part-visibility.md.
   setUIPartVisible(uiPart, isVisible) {
@@ -597,17 +640,16 @@ window.MapBridge = {
   },
   // Resolves the WGS84 position of two POIs by id in one round trip, and
   // reports both back to native via AndroidBridge.onPositionsResolved.
-  // POIs carry no direct lat/lng field — it's read from the first
-  // marker/label/image's `position` instead, whichever exists first. A
-  // missing id (or a POI with none of markers/labels/images) resolves to
-  // `null` for that slot rather than throwing, so native can tell "not
+  // POIs carry no direct lat/lng field — see poiDisplayPosition above. A
+  // missing id (or a POI with no position at all) resolves to `null` for
+  // that slot rather than throwing, so native can tell "not
   // found" apart from a real position. `requestId` is echoed back as-is so
   // native can match this response to the Start press that triggered it.
   // See docs/features/simulated-position.md.
   resolvePositions(requestId, originId, destinationId) {
     const resolve = (poiId) => {
       const poi = venue?.pois.find((p) => p.id === poiId);
-      const position = poi?.markers?.[0]?.position ?? poi?.labels?.[0]?.position ?? poi?.images?.[0]?.position;
+      const position = poi && poiDisplayPosition(poi);
       return position ? { latitude: position.latitude, longitude: position.longitude } : null;
     };
     bridge?.onPositionsResolved(
@@ -645,15 +687,18 @@ window.MapBridge = {
   // call (every ~150 ms while the simulation runs, so it looks live). The
   // style is also kept here, since the SDK has no getter for it and resets
   // it whenever tracking stops — see injectTrackedPosition above. An invalid
-  // color throws (hex, rgba() or hsl() only); the error is reported as-is.
-  // See docs/features/accuracy-circle-style.md.
+  // color throws (hex, rgba() or hsl() only): the style is then not kept, and
+  // `false` is returned, which native reads from evaluateJavascript's result
+  // to keep its own selection unchanged. See docs/features/accuracy-circle-style.md.
   setPositionTrackerStyle(color, opacity) {
-    if (!view) return;
+    if (!view) return false;
     try {
       view.updatePositionTrackerGraphicOptions({ color, opacity });
       positionTrackerStyle = { color, opacity };
+      return true;
     } catch (error) {
       console.error('updatePositionTrackerGraphicOptions failed', error);
+      return false;
     }
   },
   // Removes the marker/circle injected above. There is no dedicated stop
@@ -728,7 +773,7 @@ window.MapBridge = {
   // call triggered it, same convention as loadCustomData/resolvePositions.
   // Category is `{ readonly id: string }` — a raw internal identifier (a
   // numeric string on this shared demo map, e.g. "1".."11"), not itself
-  // human-readable — confirmed live. The display name comes from
+  // human-readable. The display name comes from
   // venue.translator.translateCategory(), same Translator lookup already
   // used for POI/floor names elsewhere in this file. `id` is still what
   // filtering/highlighting must use; `label` is for display only. See
@@ -752,7 +797,7 @@ window.MapBridge = {
   // unaffected — expected, not a bug. See docs/features/category-highlight.md.
   highlightCategory(categoryId) {
     if (!venue) return;
-    this.clearCategoryHighlight();
+    clearHighlightedCategory();
     venue.pois
       .filter((poi) => poi.categories.some((category) => category.id === categoryId))
       .forEach((poi) => {
@@ -768,21 +813,13 @@ window.MapBridge = {
   // color — a no-op omission would not do the same thing. See
   // docs/features/category-highlight.md.
   clearCategoryHighlight() {
-    if (!venue || !highlightedCategoryId) return;
-    venue.pois
-      .filter((poi) => poi.categories.some((category) => category.id === highlightedCategoryId))
-      .forEach((poi) => {
-        poi.surfaces.forEach((surface) => {
-          venue.updateSurface(surface, { color: 'initial' });
-        });
-      });
-    highlightedCategoryId = null;
+    clearHighlightedCategory();
   },
   // Creates a POI at runtime, without republishing the map in VisioMapEditor,
   // and gives it a visual footprint by attaching a Label — a bare POI created
   // via venue.createPOI has no images/labels/lines/surfaces/markers of its
   // own, so it would otherwise be invisible on the map. The new label's
-  // position is copied from anchorId's own first label/marker/image (no
+  // position is copied from anchorId's own position (poiDisplayPosition, no
   // "tap the map to place a pin" UI in this demo) rather than picked by the
   // user. All three outcomes below (anchor not found, anchor has no position
   // to copy, duplicate newId) are reported back as normal states via
@@ -799,7 +836,7 @@ window.MapBridge = {
       report('anchor-not-found');
       return;
     }
-    const anchorPosition = anchorPositionOf(anchor);
+    const anchorPosition = poiDisplayPosition(anchor);
     if (!anchorPosition) {
       report('anchor-has-no-position');
       return;
@@ -812,7 +849,7 @@ window.MapBridge = {
       report('created', { id: poi.id, text: label.text });
     } catch (error) {
       // createPOI's only documented failure mode is POIAlreadyExistsError
-      // (see the SDK's Venue.d.ts) — but that class isn't part of this
+      // (see the SDK's Venue typings) — but that class isn't part of this
       // package's public exports, so it can't be caught with `instanceof`.
       // Its constructor name survives bundling unminified, so that's the
       // most reliable check available from here.
@@ -842,7 +879,7 @@ window.MapBridge = {
     dynamicLabel = null;
   },
   // Places an Image owned by the anchor POI itself, at that POI's own
-  // position (copied via anchorPositionOf, same as createDynamicPoi), 6x6
+  // position (copied via poiDisplayPosition, same as createDynamicPoi), 6x6
   // meters, oriented per orientationType ('fixed' | 'flat' | 'facing'). Any
   // image previously placed under the same imageId is removed first, so only
   // one exists per id. The outcome (placed / anchor not found / anchor has no
@@ -859,14 +896,13 @@ window.MapBridge = {
       report('anchor-not-found');
       return;
     }
-    // Read before removing the previous image: once placed, our own image
-    // becomes one of anchor.images too.
-    const position = anchorPositionOf(anchor);
+    // Our own previous image (once placed, one of anchor.images) is skipped.
+    const position = poiDisplayPosition(anchor, [iconImages.get(imageId)]);
     if (!position) {
       report('anchor-has-no-position');
       return;
     }
-    window.MapBridge.removeIconImage(imageId);
+    removeIconImageById(imageId);
     try {
       const image = venue.createImage({
         poi: anchor,
@@ -893,14 +929,11 @@ window.MapBridge = {
   // Removes a placed image via venue.removeImage. A no-op if nothing is
   // placed under imageId. See docs/features/3d-icon-marker.md.
   removeIconImage(imageId) {
-    const image = iconImages.get(imageId);
-    if (!venue || !image) return;
-    venue.removeImage(image);
-    iconImages.delete(imageId);
+    removeIconImageById(imageId);
   },
   // Places a free-text Label owned by the anchor POI, at that POI's own
-  // position (copied via anchorPositionOf, same as createDynamicPoi /
-  // placeIconImage) offset by CUSTOM_TEXT_LABEL_OFFSET. `options` is
+  // position (copied via poiDisplayPosition, same as createDynamicPoi /
+  // placeIconImage) offset by ANCHOR_OFFSET. `options` is
   // { text, color, width, height, rotation } — height is always passed
   // explicitly, since createLabel otherwise defaults it to width (a square
   // box). Text, anchor and anchor position are all validated BEFORE touching
@@ -927,16 +960,16 @@ window.MapBridge = {
     }
     // Our previous label may still be attached to this anchor: skip it, so a
     // re-place never copies (and re-offsets) our own label's position.
-    const anchorPosition = anchorPositionOf(anchor, customTextLabel);
+    const anchorPosition = poiDisplayPosition(anchor, [customTextLabel]);
     if (!anchorPosition) {
       report('anchor-has-no-position');
       return;
     }
-    window.MapBridge.removeTextLabel();
+    removeCustomTextLabel();
     const position = {
       ...anchorPosition,
-      latitude: anchorPosition.latitude + CUSTOM_TEXT_LABEL_OFFSET,
-      longitude: anchorPosition.longitude + CUSTOM_TEXT_LABEL_OFFSET,
+      latitude: anchorPosition.latitude + ANCHOR_OFFSET,
+      longitude: anchorPosition.longitude + ANCHOR_OFFSET,
     };
     try {
       customTextLabel = venue.createLabel({
@@ -971,21 +1004,19 @@ window.MapBridge = {
   setTextLabelRotation(rotation) {
     if (!venue || !customTextLabel) return;
     const { poi, position, width, height, text, color } = customTextLabel;
-    window.MapBridge.removeTextLabel();
+    removeCustomTextLabel();
     customTextLabel = venue.createLabel({ poi, position, width, height, text, color, rotation });
   },
   // Removes the placed label via venue.removeLabel and forgets it — the SDK
   // throws "Provided label is not registered" on a second removal, so this
   // is a no-op if nothing is placed. See docs/features/custom-text-label.md.
   removeTextLabel() {
-    if (!venue || !customTextLabel) return;
-    venue.removeLabel(customTextLabel);
-    customTextLabel = null;
+    removeCustomTextLabel();
   },
   // Pins an HTML element (a `div` badge) on the map via venue.createMarker,
   // owned by the anchor POI, at that POI's own position (copied via
-  // anchorPositionOf, skipping our own marker, which sits in poi.markers once
-  // placed) offset by CUSTOM_TEXT_LABEL_OFFSET. Text, anchor and anchor
+  // poiDisplayPosition, skipping our own marker, which sits in poi.markers once
+  // placed) offset by ANCHOR_OFFSET. Text, anchor and anchor
   // position are validated BEFORE touching the badge already placed: a failed
   // place leaves it untouched. The SDK forces `pointer-events: none` on the
   // element at creation, so it's set back to `auto` right after, making the
@@ -1006,16 +1037,16 @@ window.MapBridge = {
       reportHtmlMarkerState('anchor-not-found');
       return;
     }
-    const anchorPosition = anchorPositionOf(anchor, null, htmlMarker);
+    const anchorPosition = poiDisplayPosition(anchor, [htmlMarker]);
     if (!anchorPosition) {
       reportHtmlMarkerState('anchor-has-no-position');
       return;
     }
-    window.MapBridge.removeHtmlMarker({ silent: true });
+    removeHtmlMarkerSilently();
     const position = {
       ...anchorPosition,
-      latitude: anchorPosition.latitude + CUSTOM_TEXT_LABEL_OFFSET,
-      longitude: anchorPosition.longitude + CUSTOM_TEXT_LABEL_OFFSET,
+      latitude: anchorPosition.latitude + ANCHOR_OFFSET,
+      longitude: anchorPosition.longitude + ANCHOR_OFFSET,
     };
     const element = document.createElement('div');
     element.style.cssText = HTML_MARKER_STYLE;
@@ -1032,7 +1063,7 @@ window.MapBridge = {
       htmlMarker = marker;
       htmlMarkerTapCount = 0;
       reportHtmlMarkerState('placed');
-      window.MapBridge.goToPlace(anchor.id);
+      goToPoi(anchor);
     } catch (error) {
       reportHtmlMarkerState('error', { message: String(error?.message ?? error) });
     }
@@ -1061,18 +1092,13 @@ window.MapBridge = {
   // Removes the badge via venue.removeMarker (which also detaches the element
   // from the DOM), forgets it — the SDK throws "Provided marker is not
   // registered" on a second removal — and reverts goToPlace's highlight. A
-  // no-op if nothing is placed. `silent` skips the state report (used by
-  // placeHtmlMarker, which reports once itself). See
+  // no-op if nothing is placed. See
   // docs/features/html-overlay-marker.md.
-  removeHtmlMarker({ silent = false } = {}) {
+  removeHtmlMarker() {
     if (!venue || !htmlMarker) return;
-    venue.removeMarker(htmlMarker);
-    htmlMarker = null;
-    htmlMarkerTapCount = 0;
-    if (!silent) {
-      window.MapBridge.clearPlace();
-      reportHtmlMarkerState('removed');
-    }
+    removeHtmlMarkerSilently();
+    clearSelectedPoi();
+    reportHtmlMarkerState('removed');
   },
   // custom-theme: reports the theme list + current theme/accent colors so
   // the native sheet can build its theme control from `view.themes` (never
@@ -1131,8 +1157,7 @@ window.MapBridge = {
   // Reports the venue's currentLocale back to native in one round trip, so
   // the runtime-locale sheet can highlight whichever option is already
   // active when it opens. There is no locale-change event to listen for
-  // instead, so this is only ever called once, right when the sheet is
-  // shown. Same requestId-echo convention as getCategories/loadCustomData,
+  // instead, so it is called every time the panel opens. Same requestId-echo convention as getCategories/loadCustomData,
   // reusing the { status, locale } shape of setLocale below so native can
   // share one response parser for both. See docs/features/runtime-locale.md.
   getCurrentLocale(requestId) {
@@ -1142,7 +1167,7 @@ window.MapBridge = {
   // Switches the map's displayed language via venue.setCurrentLocale, which
   // re-renders POI/label names (and the current View's UI/Navigation) with
   // the new locale by itself — no manual re-fetch of POI data needed, per
-  // the SDK's own Venue.ts TSDoc on setCurrentLocale/currentLocale. It is
+  // the SDK's own doc of setCurrentLocale/currentLocale. It is
   // Promise-based, so the resolved locale is only reported back to native
   // (onLocaleResolved, requestId echoed) once the switch actually completes,
   // same "wait for the async result" idiom as loadCustomData/
@@ -1276,9 +1301,9 @@ function buildingFloorsPayload(building) {
 // keep its highlighted entry in sync even when the floor changes another way
 // — the SDK's own default floor-selector widget, or a goToPOI on a POI of a
 // different floor. Floor ids are unique across the whole venue (see the
-// SDK's Floor.d.ts), so the native side can match this against its own
+// SDK's Floor typings), so the native side can match this against its own
 // building-scoped floor list with no ambiguity. See
-// docs/features/floor-selector.md, "Points d'attention".
+// docs/features/floor-selector.md, "Things to know".
 function onCurrentFloorChanged(event) {
   bridge?.onFloorChanged(event.newFloor?.id ?? null);
 }
@@ -1287,7 +1312,7 @@ function onCurrentFloorChanged(event) {
 // string, so the explore-mode control can keep its highlighted option in
 // sync even when the mode changes another way than its own buttons — most
 // notably a click while in "building" mode, which the SDK auto-switches to
-// "floor" (see the SDK's ExploreMode.ts). Also used to seed the control's
+// "floor" (see the SDK's ExploreMode typings). Also used to seed the control's
 // initial highlight once, right after the view is created (see main()
 // below) — currentExploreMode always starts at "global". See
 // docs/features/explore-mode.md.
@@ -1364,7 +1389,7 @@ async function loadAndShowVenue(loadOptions, loaderContainer) {
     view.addEventListener('trackingoff', onTrackingStateChanged);
     view.addEventListener('trackingchanged', onTrackingStateChanged);
     // Only the first building's floors are exposed today — see
-    // docs/features/floor-selector.md, "Points d'attention" for why a
+    // docs/features/floor-selector.md, "Things to know" for why a
     // building switcher is out of scope for this demo.
     const building = venue.venueLayout.buildings[0];
     if (building) {
