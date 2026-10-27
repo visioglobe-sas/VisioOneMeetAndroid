@@ -34,32 +34,15 @@ private fun WebView.computeNavigationExcludingModalities(
 ```
 
 ```js
-// window.MapBridge, JS side
+// window.MapBridge, JS side — drawNavigation() is shown in compute-navigation.md
 computeNavigationExcludingModalities(origin, destination, isAccessible, excludeElevator) {
-  if (!venue || !view) return;
-  this.clearNavigation();
-  try {
-    const navigation = venue.computeNavigation({
-      origin,
-      destination,
-      isAccessible,
-      type: 'fastest',
-      firstNodeAsIntersection: false,
-      mergeFloorChangeInstructions: false,
-      excludedAttributes: excludeElevator ? ['lift'] : [],
-    });
-    currentNavigationTrace = venue.createNavigationTrace(navigation);
-    view.setCurrentNavigationTrace(currentNavigationTrace);
-    bridge?.onNavigationComputed();
-  } catch (error) {
-    bridge?.onNavigationError(String(error?.message ?? error));
-  }
+  drawNavigation({ origin, destination, isAccessible, excludedAttributes: excludeElevator ? ['lift'] : [] });
 },
 ```
 
 ## Things to know
 
-- **The elevator segment attribute string is `'lift'`, not `'elevator'`.** The SDK's own JSDoc comment on `excludedAttributes` (`NavigationRequest.d.ts`) describes it in terms of "elevator", which is misleading — the actual `SegmentAttribute` value emitted for an elevator hop's instructions (and the value `excludedAttributes` must be given to exclude it) is `'lift'`. Confirmed live against the shared demo venue used by this repo: `venue.computeNavigation({ origin: 'B1-LL01-ID0013', destination: 'B1-UL02-ID0012' })` (no exclusion) returns a route with one elevator hop, whose instruction carries `attributes: ['lift', 'B1-lift-1']`; the same call with `excludedAttributes: ['lift']` reroutes through stairways instead — genuinely different, longer route, not a no-op.
+- **The elevator segment attribute string is `'lift'`, not `'elevator'`.** The SDK's own JSDoc comment on `excludedAttributes` (`NavigationRequest` typings) describes it in terms of "elevator", which is misleading — the actual `SegmentAttribute` value emitted for an elevator hop's instructions (and the value `excludedAttributes` must be given to exclude it) is `'lift'`. Confirmed live against the shared demo venue used by this repo: `venue.computeNavigation({ origin: 'B1-LL01-ID0013', destination: 'B1-UL02-ID0012' })` (no exclusion) returns a route with one elevator hop, whose instruction carries `attributes: ['lift', 'B1-lift-1']`; the same call with `excludedAttributes: ['lift']` reroutes through stairways instead — genuinely different, longer route, not a no-op.
 - `excludedAttributes` is an array — passing more than one attribute string excludes every segment carrying any of them. An empty array (or omitting the option) behaves exactly like a plain `computeNavigation` call with no exclusion.
 - **If no route survives the exclusion, this fails exactly like an ordinary unreachable origin/destination pair.** `venue.computeNavigation` throws the same `InvalidNavigationRequestError` it would for a bad/unreachable id (see [Compute Navigation](compute-navigation.md), "Things to know") — there is no separate error type or message distinguishing "no route without the excluded attribute(s)" from any other unreachable-pair failure.
 - Every other `NavigationRequest` field (`origin`/`destination` accepting a `POI`, a `Position`, or a string id; `isAccessible`; `type`; `firstNodeAsIntersection`; `mergeFloorChangeInstructions`) behaves identically to [Compute Navigation](compute-navigation.md) — `excludedAttributes` is purely additive.

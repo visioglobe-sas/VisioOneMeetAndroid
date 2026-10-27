@@ -28,25 +28,9 @@ private fun WebView.computeNavigation(origin: String, destination: String, isAcc
 ```
 
 ```js
-// window.MapBridge, JS side
+// window.MapBridge, JS side — drawNavigation() is shown in compute-navigation.md
 computeNavigation(origin, destination, isAccessible) {
-  if (!venue || !view) return;
-  this.clearNavigation();
-  try {
-    const navigation = venue.computeNavigation({
-      origin,
-      destination,
-      isAccessible,
-      type: 'fastest',
-      firstNodeAsIntersection: false,
-      mergeFloorChangeInstructions: false,
-    });
-    currentNavigationTrace = venue.createNavigationTrace(navigation);
-    view.setCurrentNavigationTrace(currentNavigationTrace);
-    bridge?.onNavigationComputed();
-  } catch (error) {
-    bridge?.onNavigationError(String(error?.message ?? error));
-  }
+  drawNavigation({ origin, destination, isAccessible });
 },
 ```
 

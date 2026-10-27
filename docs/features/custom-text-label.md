@@ -4,25 +4,30 @@
 
 Places your own free text on the map — opening hours, a price, a zone name… — independently of the labels published with the map. Built on `venue.createLabel()`, restyled live with `venue.updateLabel()` (text, color, size) and taken down with `venue.removeLabel()`.
 
-The label is owned by an existing "anchor" POI and placed next to that POI's own position — copied from its first label/marker/image, the same approach `dynamic-poi-crud.md` and `3d-icon-marker.md` use, then offset by ~4 m so it doesn't overlap the POI's own label.
+The label is owned by an existing "anchor" POI and placed next to that POI's own position — copied with the shared `poiDisplayPosition` helper (first label, else first image or marker, else the centroid of its first surface — see `simulated-position.md`), the same approach `dynamic-poi-crud.md` and `3d-icon-marker.md` use, then offset by ~4 m so it doesn't overlap the POI's own label.
 
 ## SDK usage
 
 ```js
 // web/src/main.js
 
-// POIs carry no direct lat/lng field: read it off an attached visual element,
-// skipping `excludedLabel` (our own label, possibly still attached to the anchor).
-function anchorPositionOf(poi, excludedLabel = null) {
-  return (
-    poi.labels.find((label) => label !== excludedLabel)?.position ??
-    poi.markers[0]?.position ??
-    poi.images[0]?.position
-  );
+// POIs carry no direct lat/lng field. One helper gives a POI's display position:
+// its first label's position, else its first image's or marker's, else the
+// centroid of its first surface's outline. `excluded` skips our own objects.
+function poiDisplayPosition(poi, excluded = []) {
+  const first = (items) => items?.find((item) => !excluded.includes(item))?.position;
+  const position = first(poi.labels) ?? first(poi.images) ?? first(poi.markers);
+  if (position) return position;
+  const vertices = poi.surfaces?.[0]?.positions;
+  if (!vertices?.length) return undefined;
+  return {
+    latitude: vertices.reduce((sum, p) => sum + p.latitude, 0) / vertices.length,
+    longitude: vertices.reduce((sum, p) => sum + p.longitude, 0) / vertices.length,
+  };
 }
 
 let customTextLabel = null;
-const CUSTOM_TEXT_LABEL_OFFSET = 0.00004; // degrees, ~4 m
+const ANCHOR_OFFSET = 0.00004; // degrees, ~4 m
 
 // options = { text, color, width, height, rotation }
 placeTextLabel(requestId, anchorId, options) {
@@ -41,16 +46,16 @@ placeTextLabel(requestId, anchorId, options) {
     report('anchor-not-found');
     return;
   }
-  const anchorPosition = anchorPositionOf(anchor, customTextLabel);
+  const anchorPosition = poiDisplayPosition(anchor, [customTextLabel]);
   if (!anchorPosition) {
     report('anchor-has-no-position');
     return;
   }
-  window.MapBridge.removeTextLabel(); // only one label at a time
+  removeCustomTextLabel(); // only one label at a time (venue.removeLabel)
   const position = {
     ...anchorPosition,
-    latitude: anchorPosition.latitude + CUSTOM_TEXT_LABEL_OFFSET,
-    longitude: anchorPosition.longitude + CUSTOM_TEXT_LABEL_OFFSET,
+    latitude: anchorPosition.latitude + ANCHOR_OFFSET,
+    longitude: anchorPosition.longitude + ANCHOR_OFFSET,
   };
   try {
     customTextLabel = venue.createLabel({
@@ -79,7 +84,7 @@ updateTextLabel(options) {
 setTextLabelRotation(rotation) {
   if (!venue || !customTextLabel) return;
   const { poi, position, width, height, text, color } = customTextLabel;
-  window.MapBridge.removeTextLabel();
+  removeCustomTextLabel();
   customTextLabel = venue.createLabel({ poi, position, width, height, text, color, rotation });
 },
 
@@ -93,7 +98,7 @@ removeTextLabel() {
 Native call sites (arguments are JSON-encoded before being interpolated into the script):
 
 ```kotlin
-// FeatureOverlays.kt
+// app/src/main/java/com/visioglobe/visioonemeet/ui/FeatureOverlays.kt — native bridge wrappers
 private fun WebView.placeTextLabel(
     requestId: Int, anchorId: String, text: String, color: String, size: TextLabelSize, rotation: Int,
 ) {

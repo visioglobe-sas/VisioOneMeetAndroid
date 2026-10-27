@@ -29,7 +29,7 @@ getCategories(requestId) {
 // time.
 highlightCategory(categoryId) {
   if (!venue) return;
-  this.clearCategoryHighlight();
+  clearHighlightedCategory();
   venue.pois
     .filter((poi) => poi.categories.some((category) => category.id === categoryId))
     .forEach((poi) => {
@@ -40,8 +40,13 @@ highlightCategory(categoryId) {
   highlightedCategoryId = categoryId;
 },
 
-// Reverts the highlight applied by highlightCategory, if any.
 clearCategoryHighlight() {
+  clearHighlightedCategory();
+},
+
+// Reverts the highlight applied by highlightCategory, if any (a plain function,
+// shared by both commands above).
+function clearHighlightedCategory() {
   if (!venue || !highlightedCategoryId) return;
   venue.pois
     .filter((poi) => poi.categories.some((category) => category.id === highlightedCategoryId))
@@ -51,13 +56,13 @@ clearCategoryHighlight() {
       });
     });
   highlightedCategoryId = null;
-},
+}
 ```
 
 Native call sites:
 
 ```kotlin
-// FeatureOverlays.kt
+// app/src/main/java/com/visioglobe/visioonemeet/ui/FeatureOverlays.kt — native bridge wrappers
 private fun WebView.getCategories(requestId: Int) {
     val script = "window.MapBridge.getCategories($requestId)"
     evaluateJavascript(script, null)

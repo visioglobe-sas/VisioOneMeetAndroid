@@ -30,7 +30,7 @@ async loadCustomData(requestId, placeId) {
 ```
 
 ```kotlin
-// FeatureOverlays.kt
+// app/src/main/java/com/visioglobe/visioonemeet/ui/FeatureOverlays.kt — native bridge wrappers
 private fun WebView.loadCustomData(requestId: Int, placeId: String) {
     val script = "window.MapBridge.loadCustomData($requestId, ${JSONObject.quote(placeId)})"
     evaluateJavascript(script, null)

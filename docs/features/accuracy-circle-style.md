@@ -10,13 +10,16 @@ Recolors the tracked position's precision (accuracy) circle via `view.updatePosi
 // Style kept app-side: the SDK has no getter for it and resets it whenever tracking stops.
 let positionTrackerStyle = null;
 
+// Returns whether the SDK accepted the style (it throws on an invalid color).
 setPositionTrackerStyle(color, opacity) {
-  if (!view) return;
+  if (!view) return false;
   try {
     view.updatePositionTrackerGraphicOptions({ color, opacity });
     positionTrackerStyle = { color, opacity };
+    return true;
   } catch (error) {
     console.error('updatePositionTrackerGraphicOptions failed', error);
+    return false;
   }
 },
 
@@ -32,12 +35,13 @@ injectTrackedPosition(latitude, longitude, precisionCircleRadius) {
 },
 ```
 ```kotlin
-private fun WebView.setPositionTrackerStyle(color: String, opacity: Float) {
+// onApplied only runs if the SDK accepted the style: evaluateJavascript's callback receives the
+// JS return value, JSON-encoded ("true"/"false").
+private fun WebView.setPositionTrackerStyle(color: String, opacity: Float, onApplied: () -> Unit) {
     val roundedOpacity = (opacity * 10).roundToInt() / 10.0
     evaluateJavascript(
         "window.MapBridge.setPositionTrackerStyle(${JSONObject.quote(color)}, $roundedOpacity)",
-        null,
-    )
+    ) { result -> if (result == "true") onApplied() }
 }
 
 private fun WebView.injectTrackedPosition(latitude: Double, longitude: Double, precisionCircleRadiusMeters: Double) {

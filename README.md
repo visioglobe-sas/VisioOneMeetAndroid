@@ -79,15 +79,37 @@ Each feature below is a self-contained screen in the app demonstrating one Visio
 
 ## How it works
 
-The VisioOne SDK is bundled once with Vite (`web/`), and the build output is copied into `app/src/main/assets/www/`. The Android app serves these files inside a `WebView` via `WebViewAssetLoader` (origin `https://appassets.androidx.local/...`), which avoids the CORS issues that come from loading ES modules over `file://`.
+The VisioOne SDK is bundled once with Vite (`web/`), and the build output is copied into `app/src/main/assets/www/`. The Android app serves these files inside a `WebView` via `WebViewAssetLoader` (origin `https://appassets.androidx.local/...`), which avoids the CORS issues that come from loading ES modules over `file://`. The map is recreated on every feature screen.
 
-A JS bridge (`window.AndroidBridge`, see `web/src/main.js`) notifies the Compose UI when the map is ready (`onMapReady`) or has failed (`onMapError`), driving a loading/error overlay while the map loads.
+The app and the page talk over two channels:
+
+- **Native → JS**: Kotlin calls `window.MapBridge.<command>(...)` through `WebView.evaluateJavascript()`. Every argument is JSON-encoded with `org.json` (`JSONObject.quote`, `JSONObject`, `JSONArray`) before being put in the script — never raw string concatenation, which would allow JS injection. `window.MapBridge` (in `web/src/main.js`) holds one method per command, each calling the real SDK on the page's `venue`/`view`.
+- **JS → native**: the page calls `window.AndroidBridge.<callback>(...)`, an object registered with `WebView.addJavascriptInterface()` (class `MapBridge` in `FeatureMapScreen.kt`): `onMapReady`/`onMapError` drive the loading and error overlay, and one callback per feature reports results and SDK events (`onPoiClick`, `onNavigationError`, `onCustomDataLoaded`, ...). These callbacks run on a WebView background thread, so each one posts its update to the main thread. Arguments are strings and numbers only: structured payloads are sent as JSON strings and parsed on the Kotlin side.
+- A command whose result comes back asynchronously passes a `requestId` that the callback echoes, so a stale response is never mistaken for the current one.
+
+Where a feature's code lives:
+
+- the JS side: its `window.MapBridge` methods in `web/src/main.js` (after a change, rebuild the bundle, see Setup);
+- the native side: `ui/FeatureOverlays.kt` holds, per feature, the `WebView.xxx()` bridge wrappers, the result parsers, the screen-level state and the control shown in the bottom sheet;
+- `ui/FeatureMapScreen.kt` hosts the WebView, receives the `AndroidBridge` callbacks and shows the loading/error state; `MainActivity.kt` maps each menu entry to its screen.
+
+Per-feature state (field values, the object placed on the map, a running simulation) is kept at screen level, outside the bottom sheet, which is disposed every time it closes: reopening the panel always shows the map's current state.
+
+If you enable code shrinking (`isMinifyEnabled = true`), keep the `@JavascriptInterface` methods, e.g. `-keepclassmembers class * { @android.webkit.JavascriptInterface <methods>; }` in `proguard-rules.pro`.
 
 ## Repo structure
 
 ```
-app/                    Android project (Compose)
-  src/main/assets/www/  Generated web bundle (see web/), served by the WebView
-web/                    Small Vite project that imports @visioglobe/visioone
-docs/features/          Per-feature SDK reference docs (see Features above)
+app/                                   Android project (Compose)
+  src/main/java/com/visioglobe/visioonemeet/
+    MainActivity.kt                    Navigation: feature menu -> one map screen per feature
+    model/DemoMap.kt                   Map hash and demo POI ids (replace with your own)
+    model/Feature.kt                   Feature menu registry
+    ui/FeatureMapScreen.kt             WebView host, JS -> native bridge, loading/error state
+    ui/FeatureOverlays.kt              Per-feature bridge calls, state and controls
+    sample/ProtectedMapSample.kt       auth-token code sample
+  src/main/assets/www/                 Generated web bundle (see web/), served by the WebView
+web/                                   Small Vite project that imports @visioglobe/visioone
+  src/main.js                          The page: map loading and every window.MapBridge command
+docs/features/                         Per-feature SDK reference docs (see Features above)
 ```

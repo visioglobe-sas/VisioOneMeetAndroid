@@ -7,10 +7,25 @@ Animates a simulated tracked position (a dot + accuracy circle) back and forth b
 ## SDK usage
 
 ```js
+// POIs carry no direct lat/lng field. One helper gives a POI's display position:
+// its first label's position, else its first image's or marker's, else the
+// centroid of its first surface's outline. `excluded` skips our own objects.
+function poiDisplayPosition(poi, excluded = []) {
+  const first = (items) => items?.find((item) => !excluded.includes(item))?.position;
+  const position = first(poi.labels) ?? first(poi.images) ?? first(poi.markers);
+  if (position) return position;
+  const vertices = poi.surfaces?.[0]?.positions;
+  if (!vertices?.length) return undefined;
+  return {
+    latitude: vertices.reduce((sum, p) => sum + p.latitude, 0) / vertices.length,
+    longitude: vertices.reduce((sum, p) => sum + p.longitude, 0) / vertices.length,
+  };
+}
+
 resolvePositions(requestId, originId, destinationId) {
   const resolve = (poiId) => {
     const poi = venue?.pois.find((p) => p.id === poiId);
-    const position = poi?.markers?.[0]?.position ?? poi?.labels?.[0]?.position ?? poi?.images?.[0]?.position;
+    const position = poi && poiDisplayPosition(poi);
     return position ? { latitude: position.latitude, longitude: position.longitude } : null;
   };
   bridge?.onPositionsResolved(
@@ -49,7 +64,7 @@ private fun WebView.stopTrackedPosition() {
 - Set `allowTracking = true` only once, when tracking starts — not before every `injectTrackedPosition`. Setting it to `true` always turns the camera lock (`lockCameraPositionOnTracking`) back on, so doing it on every position update re-locks the camera each time, undoing a lock the user turned off or a pan. See `camera-lock-on-position.md`.
 - There's no dedicated "stop" method: setting `view.allowTracking = false` is the documented way to make the tracked point and its accuracy circle disappear. There's no `view.removeTrackedPosition()` equivalent.
 - The SDK has no position feed of its own: the tracked point only moves while your code keeps calling `injectTrackedPosition`. Own that loop in something that lives as long as the map view (not in a transient control panel), and make sure exactly one runs at a time — two concurrent loops make the point jump between two paths, and since the next injection after a stop re-enables `allowTracking`, stopping one of them doesn't make tracking stop.
-- A POI has no direct latitude/longitude field. Position comes from the first available marker/label/image on it: `poi.markers?.[0]?.position ?? poi.labels?.[0]?.position ?? poi.images?.[0]?.position`. All three carry a `Position` (`{ latitude, longitude, altitude? }`) in the same shape `injectTrackedPosition` expects, so no conversion is needed. A POI with none of the three, or an unknown id, resolves to `null`.
+- A POI has no direct latitude/longitude field. This repo reads it with one helper used by every feature, `poiDisplayPosition` (above), always in the same order: the POI's first label (`poi.labels[0].position`), else its first image's or marker's (`poi.images[0]` / `poi.markers[0]`), else the centroid of its first surface's outline (`poi.surfaces[0].positions`, averaged). All of these are `Position`s (`{ latitude, longitude, altitude? }`), the shape `injectTrackedPosition` expects, so no conversion is needed. A POI with none of them, or an unknown id, resolves to `null`. Using one order everywhere matters: a POI with both a label and a marker would otherwise give different points to different features.
 - `resolvePositions` is asynchronous: it returns nothing directly, and the result comes back later via `onPositionsResolved`. Echo a request id so the caller can match a response to the request that produced it, in case a second request could overlap with the first before it resolves.
 - Numeric arguments (`latitude`, `longitude`, `precisionCircleRadiusMeters`) don't need `JSONObject.quote()` — `Double.toString()` is already a valid JS number literal.
 

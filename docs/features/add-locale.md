@@ -34,7 +34,7 @@ addSpanishLocale(requestId) {
 Native call site:
 
 ```kotlin
-// FeatureOverlays.kt
+// app/src/main/java/com/visioglobe/visioonemeet/ui/FeatureOverlays.kt — native bridge wrappers
 private fun WebView.addSpanishLocale(requestId: Int) {
     val script = "window.MapBridge.addSpanishLocale($requestId)"
     evaluateJavascript(script, null)
