@@ -1,11 +1,14 @@
 package com.visioglobe.visioonemeet.ui
 
+import android.content.res.Resources
 import android.webkit.WebView
+import androidx.annotation.StringRes
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -47,6 +50,8 @@ import androidx.compose.ui.unit.dp
 import androidx.core.graphics.toColorInt
 import com.visioglobe.visioonemeet.R
 import com.visioglobe.visioonemeet.model.DemoMap
+import com.visioglobe.visioonemeet.model.Feature
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -72,8 +77,8 @@ private const val SIMULATED_POSITION_DEFAULT_RADIUS_METERS = 5f
  * its normal appearance rather than a hardcoded default.
  *
  * Arguments are JSON-encoded via [org.json] before being interpolated into the generated script
- * — never raw string concatenation, to avoid JS injection (same rule as the other platforms'
- * native<->JS bridges, see docs/COMMUNICATION_GUIDE.md equivalents).
+ * — never raw string concatenation, to avoid JS injection. Every bridge call in this file follows
+ * that rule.
  */
 private fun WebView.updateOccupancy(planId: String, color: String?) {
     val entry = JSONObject().apply {
@@ -144,11 +149,8 @@ private fun WebView.clearNavigation() {
  * elevators, by calling `window.MapBridge.computeNavigationExcludingModalities` in the WebView
  * (`venue.computeNavigation()`'s `excludedAttributes` option under the hood — `['lift']` when
  * [excludeElevator] is true, `[]` otherwise). Same request shape, error surfacing
- * (`onNavigationError`/`onNavigationComputed`) and try/catch as [computeNavigation] — this is a
- * separate bridge method rather than a change to [computeNavigation]'s signature so its two
- * existing call sites ([ComputeNavigationOverlay]/[CustomNavigationTraceOverlay]) don't need
- * touching, same convention as [WebView.updateNavigationTraceStyle]. See
- * docs/features/navigation-exclude-modalities.md.
+ * (`onNavigationError`/`onNavigationComputed`) as [computeNavigation]; both share one JS
+ * implementation. See docs/features/navigation-exclude-modalities.md.
  */
 private fun WebView.computeNavigationExcludingModalities(
     origin: String,
@@ -163,10 +165,11 @@ private fun WebView.computeNavigationExcludingModalities(
 
 /**
  * A `NavigationTraceUpdateOptions` payload (colors only — `displayMode`/`thickness` can't be
- * changed after a trace is created, see NavigationTraceUpdateOptions.d.ts), one of
- * [NAVIGATION_TRACE_PRESETS]. See docs/features/custom-navigation-trace.md.
+ * changed after a trace is created), one of [NAVIGATION_TRACE_PRESETS], with the localized name
+ * shown on its chip. See docs/features/custom-navigation-trace.md.
  */
 private data class NavigationTraceColors(
+    @StringRes val nameRes: Int,
     val progressColor: String,
     val progressOutlineColor: String,
     val progressFutureColor: String,
@@ -179,12 +182,11 @@ private data class NavigationTraceColors(
  * via [WebView.updateNavigationTraceStyle] (`venue.updateNavigationTrace()` under the hood).
  * `visioglobeBlue` restates the SDK's own documented `Line` defaults (`progressColor` `#0094F0`,
  * the inactive/preview segments `#C5C5C5`) as an explicit preset rather than a fake "reset" — there
- * is no SDK call to revert to default once changed. Same 4 presets as the Vue/iOS/Flutter/React
- * Native siblings, so the catalogue stays consistent across platforms. See
- * docs/features/custom-navigation-trace.md.
+ * is no SDK call to revert to default once changed. See docs/features/custom-navigation-trace.md.
  */
 private val NAVIGATION_TRACE_PRESETS = linkedMapOf(
     "visioglobeBlue" to NavigationTraceColors(
+        nameRes = R.string.color_visioglobe_blue,
         progressColor = "#0094F0",
         progressOutlineColor = "#FFFFFF",
         progressFutureColor = "#C5C5C5",
@@ -192,6 +194,7 @@ private val NAVIGATION_TRACE_PRESETS = linkedMapOf(
         previewOutlineColor = "#FFFFFF",
     ),
     "brandRed" to NavigationTraceColors(
+        nameRes = R.string.color_red,
         progressColor = "#E53935",
         progressOutlineColor = "#FFFFFF",
         progressFutureColor = "#F8C9C7",
@@ -199,6 +202,7 @@ private val NAVIGATION_TRACE_PRESETS = linkedMapOf(
         previewOutlineColor = "#FFFFFF",
     ),
     "brandGreen" to NavigationTraceColors(
+        nameRes = R.string.color_green,
         progressColor = "#2E7D32",
         progressOutlineColor = "#FFFFFF",
         progressFutureColor = "#C8E6C9",
@@ -206,7 +210,8 @@ private val NAVIGATION_TRACE_PRESETS = linkedMapOf(
         previewOutlineColor = "#FFFFFF",
     ),
     "brandPurple" to NavigationTraceColors(
-        progressColor = "#6A1B9A",
+        nameRes = R.string.color_purple,
+        progressColor = "#8E24AA",
         progressOutlineColor = "#FFFFFF",
         progressFutureColor = "#E1BEE7",
         previewColor = "#E1BEE7",
@@ -325,15 +330,16 @@ private fun WebView.setCameraLockOnPosition(locked: Boolean) {
  * `window.MapBridge.setPositionTrackerStyle` in the WebView
  * (`view.updatePositionTrackerGraphicOptions({ color, opacity })` under the hood). Applied at the
  * next `injectTrackedPosition`; the JS side also re-applies it on every tracking (re)start, since
- * the SDK resets it whenever tracking stops. See docs/features/accuracy-circle-style.md.
+ * the SDK resets it whenever tracking stops. [onApplied] runs only if the SDK accepted the style
+ * (the JS method returns `false` when it throws on an invalid color). See
+ * docs/features/accuracy-circle-style.md.
  */
-private fun WebView.setPositionTrackerStyle(color: String, opacity: Float) {
+private fun WebView.setPositionTrackerStyle(color: String, opacity: Float, onApplied: () -> Unit) {
     // Rounded to one decimal so 0.1-step slider values reach the SDK as e.g. 0.3, not 0.30000001.
     val roundedOpacity = (opacity * 10).roundToInt() / 10.0
     evaluateJavascript(
         "window.MapBridge.setPositionTrackerStyle(${JSONObject.quote(color)}, $roundedOpacity)",
-        null,
-    )
+    ) { result -> if (result == "true") onApplied() }
 }
 
 /**
@@ -598,7 +604,7 @@ internal fun parseLocaleResultPayload(requestId: Int, json: String): LocaleResul
         LocaleResult(
             requestId = requestId,
             locale = null,
-            errorMessage = root.optString("message", "Could not change locale."),
+            errorMessage = root.optString("message").ifBlank { null },
         )
     }
 }
@@ -628,7 +634,7 @@ internal fun parseAddLocaleResultPayload(requestId: Int, json: String): AddLocal
         AddLocaleResult(
             requestId = requestId,
             translations = null,
-            errorMessage = root.optString("message", "Could not add the locale."),
+            errorMessage = root.optString("message").ifBlank { null },
         )
     }
 }
@@ -709,6 +715,122 @@ internal fun parseFloorsReadyPayload(json: String): FloorSelectorState {
     )
 }
 
+// --- Shared building blocks -------------------------------------------------------------------
+
+private val bridgeRequestIds = AtomicInteger()
+
+/**
+ * Next id to echo through a request/response bridge call (`resolvePositions`, `loadCustomData`,
+ * ...). One counter for the whole app: a response can never be mistaken for — or be equal to — the
+ * response of an earlier request, even one sent from a previous opening of the panel.
+ */
+internal fun nextBridgeRequestId(): Int = bridgeRequestIds.getAndIncrement()
+
+/** A localized message held outside composition: a string resource and its format arguments. */
+data class UiText(@StringRes val res: Int, val args: List<Any> = emptyList())
+
+@Composable
+private fun UiText.resolve(): String =
+    if (args.isEmpty()) stringResource(res) else stringResource(res, *args.toTypedArray())
+
+/** Parses a `#RRGGBB` color, the format of every color preset in this file. */
+internal fun parseHexColor(hex: String): Color = Color(hex.toColorInt())
+
+/**
+ * One color choice chip. The swatch gets an outline in the panel's content color, so dark (Black)
+ * and light (White/Yellow) swatches stay visible on either a dark or a light panel.
+ */
+@Composable
+private fun ColorChip(hex: String, name: String, selected: Boolean, onClick: () -> Unit) {
+    FilterChip(
+        selected = selected,
+        onClick = onClick,
+        label = { Text(name) },
+        leadingIcon = {
+            Box(
+                modifier = Modifier
+                    .size(14.dp)
+                    .clip(CircleShape)
+                    .background(parseHexColor(hex))
+                    .border(1.dp, MaterialTheme.colorScheme.onSurface, CircleShape),
+            )
+        },
+        modifier = Modifier.padding(end = 8.dp),
+    )
+}
+
+/** An error line under a control, or nothing when [text] is null. */
+@Composable
+private fun ErrorText(text: String?) {
+    if (text == null) return
+    Spacer(modifier = Modifier.height(8.dp))
+    Text(text = text, color = MaterialTheme.colorScheme.error)
+}
+
+/**
+ * The From/To place-id fields shared by every itinerary screen ([ItineraryControls]) and every
+ * tracked-position screen ([TrackedPositionSimulationControls]).
+ */
+@Composable
+private fun FromToFields(
+    from: String,
+    onFromChange: (String) -> Unit,
+    to: String,
+    onToChange: (String) -> Unit,
+    enabled: Boolean = true,
+) {
+    Row(modifier = Modifier.fillMaxWidth()) {
+        OutlinedTextField(
+            value = from,
+            onValueChange = onFromChange,
+            label = { Text(stringResource(R.string.field_from_place_id)) },
+            singleLine = true,
+            enabled = enabled,
+            modifier = Modifier.weight(1f),
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        OutlinedTextField(
+            value = to,
+            onValueChange = onToChange,
+            label = { Text(stringResource(R.string.field_to_place_id)) },
+            singleLine = true,
+            enabled = enabled,
+            modifier = Modifier.weight(1f),
+        )
+    }
+}
+
+/**
+ * One full-width button per option, the [current] one rendered as a filled, disabled [Button]
+ * (tapping it again would be a no-op), every other one as an [OutlinedButton] calling [onSelect].
+ * Used by `floor-selector`, `runtime-locale` and `explore-mode`.
+ */
+@Composable
+private fun CurrentOptionButtons(
+    options: List<Pair<String, String>>,
+    current: String?,
+    onSelect: (String) -> Unit,
+) {
+    options.forEach { (value, label) ->
+        val buttonModifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp)
+        if (value == current) {
+            Button(onClick = {}, enabled = false, modifier = buttonModifier) { Text(label) }
+        } else {
+            OutlinedButton(onClick = { onSelect(value) }, modifier = buttonModifier) { Text(label) }
+        }
+    }
+}
+
+/** Screen-level text field value, for screens whose only state is one place id. */
+@Stable
+class PlaceIdSession(initialPlaceId: String) {
+    var placeId by mutableStateOf(initialPlaceId)
+}
+
+// --- Feature controls -----------------------------------------------------------------------
+
 @Composable
 fun ResetViewOverlay(webView: WebView?) {
     Button(
@@ -719,37 +841,29 @@ fun ResetViewOverlay(webView: WebView?) {
     }
 }
 
+/**
+ * Screen-level state of `occupancy-simulated`: the place id and whether the simulation runs. The
+ * loop itself is [OccupancySimulationHost], composed at screen level, so the simulation keeps
+ * running with the panel closed (the visitor closes it to watch the map). See
+ * docs/features/occupancy-simulated.md.
+ */
+@Stable
+class OccupancySession(initialPlaceId: String) {
+    var placeId by mutableStateOf(initialPlaceId)
+    var isRunning by mutableStateOf(false)
+}
+
+/**
+ * The occupancy loop: while [OccupancySession.isRunning], cycles the place's surface through
+ * [OCCUPANCY_COLORS]. Stopping it — or leaving the screen, which cancels this effect — resets the
+ * surface in the `finally` block rather than leaving it on the last simulated color.
+ */
 @Composable
-fun OccupancySimulationOverlay(webView: WebView?) {
-    var placeId by remember { mutableStateOf(DemoMap.OCCUPANCY_PLACE_ID) }
-    var simulatingOccupancy by remember { mutableStateOf(false) }
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(16.dp),
-    ) {
-        OutlinedTextField(
-            value = placeId,
-            onValueChange = { placeId = it },
-            label = { Text("Place ID") },
-            singleLine = true,
-            modifier = Modifier.weight(1f),
-        )
-        Spacer(modifier = Modifier.width(8.dp))
-        Button(
-            onClick = { simulatingOccupancy = !simulatingOccupancy },
-            enabled = simulatingOccupancy || placeId.isNotBlank(),
-        ) {
-            Text(if (simulatingOccupancy) "Stop occupancy simulation" else "Simulate occupancy")
-        }
-    }
-
-    LaunchedEffect(simulatingOccupancy, placeId, webView) {
-        val targetPlaceId = placeId.trim()
-        val view = webView
-        if (!simulatingOccupancy || targetPlaceId.isEmpty() || view == null) return@LaunchedEffect
-
+fun OccupancySimulationHost(session: OccupancySession, webView: WebView?) {
+    LaunchedEffect(session.isRunning, webView) {
+        val view = webView ?: return@LaunchedEffect
+        if (!session.isRunning) return@LaunchedEffect
+        val targetPlaceId = session.placeId.trim()
         var colorIndex = 0
         view.updateOccupancy(targetPlaceId, OCCUPANCY_COLORS[colorIndex])
         try {
@@ -759,8 +873,37 @@ fun OccupancySimulationOverlay(webView: WebView?) {
                 view.updateOccupancy(targetPlaceId, OCCUPANCY_COLORS[colorIndex])
             }
         } finally {
-            // Reset the surface rather than leaving it stuck on the last simulated color.
             view.updateOccupancy(targetPlaceId, null)
+        }
+    }
+}
+
+/** FAB-triggered control for `occupancy-simulated`, bound to the screen-level [OccupancySession]. */
+@Composable
+fun OccupancySimulationOverlay(session: OccupancySession) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp),
+    ) {
+        OutlinedTextField(
+            value = session.placeId,
+            onValueChange = { session.placeId = it },
+            label = { Text(stringResource(R.string.field_place_id)) },
+            singleLine = true,
+            enabled = !session.isRunning,
+            modifier = Modifier.weight(1f),
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Button(
+            onClick = { session.isRunning = !session.isRunning },
+            enabled = session.isRunning || session.placeId.isNotBlank(),
+        ) {
+            Text(
+                stringResource(
+                    if (session.isRunning) R.string.occupancy_stop else R.string.occupancy_start,
+                ),
+            )
         }
     }
 }
@@ -768,46 +911,42 @@ fun OccupancySimulationOverlay(webView: WebView?) {
 /**
  * FAB-triggered control for `goto-poi`: a Place ID field plus "Go" (centers the camera on that
  * POI via [WebView.goToPlace]) and "Clear" (undoes the highlight via [WebView.clearPlace], camera
- * stays put) — same UX as the React Native sibling's `GoToPoiOverlay`. See docs/features/goto-poi.md.
+ * stays put). See docs/features/goto-poi.md.
  */
 @Composable
-fun GoToPoiOverlay(webView: WebView?) {
-    var placeId by remember { mutableStateOf(DemoMap.GOTO_POI_ID) }
-
+fun GoToPoiOverlay(session: PlaceIdSession, webView: WebView?) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .padding(16.dp),
     ) {
         OutlinedTextField(
-            value = placeId,
-            onValueChange = { placeId = it },
-            label = { Text("Place ID") },
+            value = session.placeId,
+            onValueChange = { session.placeId = it },
+            label = { Text(stringResource(R.string.field_place_id)) },
             singleLine = true,
             modifier = Modifier.weight(1f),
         )
         Spacer(modifier = Modifier.width(8.dp))
         Button(
-            onClick = { webView?.goToPlace(placeId.trim()) },
-            enabled = placeId.isNotBlank(),
+            onClick = { webView?.goToPlace(session.placeId.trim()) },
+            enabled = session.placeId.isNotBlank(),
         ) {
-            Text("Go")
+            Text(stringResource(R.string.action_go))
         }
         Spacer(modifier = Modifier.width(8.dp))
         Button(onClick = { webView?.clearPlace() }) {
-            Text("Clear")
+            Text(stringResource(R.string.action_clear))
         }
     }
 }
 
 /**
  * FAB-triggered control for `floor-selector`: one button per floor of the current building,
- * highest first, calling [WebView.goToFloor] on tap. The current floor (per
- * [FloorSelectorState.currentFloorId]) is rendered as a filled [Button] (and disabled, since
- * tapping it again would be a no-op); every other floor is an [OutlinedButton]. Demonstrates
- * driving `view.goToFloor` from native code — the SDK's own default floor-selector widget
- * (visible on the map with no app code at all) already offers this to the end user, see
- * docs/features/floor-selector.md, "Points d'attention".
+ * highest first, calling [WebView.goToFloor] on tap, the current floor (per
+ * [FloorSelectorState.currentFloorId]) highlighted. Demonstrates driving `view.goToFloor` from
+ * native code — the SDK's own default floor-selector widget (visible on the map with no app code at
+ * all) already offers this to the end user, see docs/features/floor-selector.md.
  */
 @Composable
 fun FloorSelectorOverlay(webView: WebView?, floorSelector: FloorSelectorState) {
@@ -817,327 +956,184 @@ fun FloorSelectorOverlay(webView: WebView?, floorSelector: FloorSelectorState) {
             .padding(16.dp),
     ) {
         if (floorSelector.floors.isEmpty()) {
-            Text("Floor data is not available yet.")
+            Text(stringResource(R.string.floor_selector_unavailable))
             return@Column
         }
         val buildingId = floorSelector.buildingId
-        floorSelector.floors
-            .sortedByDescending { it.levelIndex }
-            .forEach { floor ->
-                val isCurrent = floor.id == floorSelector.currentFloorId
-                val buttonModifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 4.dp)
-                if (isCurrent) {
-                    Button(onClick = {}, enabled = false, modifier = buttonModifier) {
-                        Text(floor.name)
-                    }
-                } else {
-                    OutlinedButton(
-                        onClick = { if (buildingId != null) webView?.goToFloor(buildingId, floor.id) },
-                        modifier = buttonModifier,
-                    ) {
-                        Text(floor.name)
-                    }
-                }
-            }
+        CurrentOptionButtons(
+            options = floorSelector.floors.sortedByDescending { it.levelIndex }.map { it.id to it.name },
+            current = floorSelector.currentFloorId,
+            onSelect = { floorId -> if (buildingId != null) webView?.goToFloor(buildingId, floorId) },
+        )
     }
 }
 
 /**
- * FAB-triggered control for `compute-navigation`: "From"/"To" Place ID fields plus an "Itinerary"
- * button (computes and draws the route via [WebView.computeNavigation]) and a "Clear" button
- * (removes it via [WebView.clearNavigation]) — same two-field UX as the React Native sibling's
- * `ComputeNavigationOverlay`, `isAccessible` fixed to `false` as on that sibling (no UI toggle for
- * it yet). A failed computation (bad/unreachable Place ID) surfaces [navigationError] below the
- * fields instead of leaving the map silently unchanged. See docs/features/compute-navigation.md.
+ * Screen-level state of an itinerary screen (`compute-navigation`, `custom-navigation-trace`,
+ * `navigation-exclude-modalities`, `accessible-mode`): the From/To fields, the screen's switch
+ * ("Avoid elevator" / "Accessible route") and the selected trace color, so closing and reopening
+ * the panel keeps them — and the next "Itinerary" press uses what the panel shows.
+ */
+@Stable
+class ItinerarySession(initialOrigin: String, initialDestination: String) {
+    var origin by mutableStateOf(initialOrigin)
+    var destination by mutableStateOf(initialDestination)
+
+    /** `navigation-exclude-modalities`' "Avoid elevator" / `accessible-mode`'s "Accessible route". */
+    var optionEnabled by mutableStateOf(false)
+
+    /** `custom-navigation-trace`'s selected [NAVIGATION_TRACE_PRESETS] key. */
+    var tracePresetKey by mutableStateOf(NAVIGATION_TRACE_PRESETS.keys.first())
+}
+
+/**
+ * The From/To fields, "Itinerary" and "Clear" buttons and the [navigationError] line shared by the
+ * four itinerary screens; [onItinerary] makes the screen's own bridge call with the trimmed ids,
+ * [extraContent] renders the screen's own extra control below.
  */
 @Composable
-fun ComputeNavigationOverlay(webView: WebView?, navigationError: String?) {
-    var origin by remember { mutableStateOf(DemoMap.ITINERARY_FROM) }
-    var destination by remember { mutableStateOf(DemoMap.ITINERARY_TO) }
-
+private fun ItineraryControls(
+    session: ItinerarySession,
+    webView: WebView?,
+    navigationError: String?,
+    onItinerary: (webView: WebView, origin: String, destination: String) -> Unit,
+    extraContent: @Composable ColumnScope.() -> Unit = {},
+) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(16.dp),
     ) {
-        Row(modifier = Modifier.fillMaxWidth()) {
-            OutlinedTextField(
-                value = origin,
-                onValueChange = { origin = it },
-                label = { Text("From (place ID)") },
-                singleLine = true,
-                modifier = Modifier.weight(1f),
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            OutlinedTextField(
-                value = destination,
-                onValueChange = { destination = it },
-                label = { Text("To (place ID)") },
-                singleLine = true,
-                modifier = Modifier.weight(1f),
-            )
-        }
-        Spacer(modifier = Modifier.height(8.dp))
-        Row(modifier = Modifier.fillMaxWidth()) {
-            Button(
-                onClick = { webView?.computeNavigation(origin.trim(), destination.trim(), false) },
-                enabled = origin.isNotBlank() && destination.isNotBlank(),
-            ) {
-                Text("Itinerary")
-            }
-            Spacer(modifier = Modifier.width(8.dp))
-            Button(onClick = { webView?.clearNavigation() }) {
-                Text("Clear")
-            }
-        }
-        if (navigationError != null) {
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(text = navigationError, color = MaterialTheme.colorScheme.error)
-        }
-    }
-}
-
-/**
- * FAB-triggered control for `custom-navigation-trace`: reuses `compute-navigation`'s itinerary
- * fields/buttons verbatim ([WebView.computeNavigation]/[WebView.clearNavigation], same
- * `navigationError` surfacing) rather than duplicating that logic, then adds a row of color
- * swatches below — one per [NAVIGATION_TRACE_PRESETS] entry — applying [WebView.updateNavigationTraceStyle]
- * (`venue.updateNavigationTrace()` under the hood). Tapping a swatch restyles whatever trace is
- * currently displayed immediately (a no-op if none is), same convention as
- * [CameraLockOnPositionOverlay] reusing `simulated-position`'s tracking loop instead of duplicating
- * it. The selected preset is remembered ([selectedPresetKey]) so the next "Itinerary" press
- * restyles the freshly computed trace too — the SDK only lets a trace be built in its own default
- * look, so this second call is always needed for anything but the default. See
- * docs/features/custom-navigation-trace.md.
- */
-@Composable
-fun CustomNavigationTraceOverlay(webView: WebView?, navigationError: String?) {
-    var origin by remember { mutableStateOf(DemoMap.ITINERARY_FROM) }
-    var destination by remember { mutableStateOf(DemoMap.ITINERARY_TO) }
-    var selectedPresetKey by remember { mutableStateOf(NAVIGATION_TRACE_PRESETS.keys.first()) }
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(16.dp),
-    ) {
-        Row(modifier = Modifier.fillMaxWidth()) {
-            OutlinedTextField(
-                value = origin,
-                onValueChange = { origin = it },
-                label = { Text("From (place ID)") },
-                singleLine = true,
-                modifier = Modifier.weight(1f),
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            OutlinedTextField(
-                value = destination,
-                onValueChange = { destination = it },
-                label = { Text("To (place ID)") },
-                singleLine = true,
-                modifier = Modifier.weight(1f),
-            )
-        }
+        FromToFields(
+            from = session.origin,
+            onFromChange = { session.origin = it },
+            to = session.destination,
+            onToChange = { session.destination = it },
+        )
         Spacer(modifier = Modifier.height(8.dp))
         Row(modifier = Modifier.fillMaxWidth()) {
             Button(
                 onClick = {
-                    webView?.computeNavigation(origin.trim(), destination.trim(), false)
-                    webView?.updateNavigationTraceStyle(NAVIGATION_TRACE_PRESETS.getValue(selectedPresetKey))
+                    webView?.let { onItinerary(it, session.origin.trim(), session.destination.trim()) }
                 },
-                enabled = origin.isNotBlank() && destination.isNotBlank(),
+                enabled = session.origin.isNotBlank() && session.destination.isNotBlank(),
             ) {
-                Text("Itinerary")
+                Text(stringResource(R.string.action_itinerary))
             }
             Spacer(modifier = Modifier.width(8.dp))
             Button(onClick = { webView?.clearNavigation() }) {
-                Text("Clear")
+                Text(stringResource(R.string.action_clear))
             }
         }
-        if (navigationError != null) {
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(text = navigationError, color = MaterialTheme.colorScheme.error)
-        }
+        ErrorText(navigationError)
+        extraContent()
+    }
+}
 
-        Spacer(modifier = Modifier.height(16.dp))
-        Text(text = "Trace color", style = MaterialTheme.typography.titleSmall)
-        Spacer(modifier = Modifier.height(8.dp))
-        Row(modifier = Modifier.fillMaxWidth()) {
-            NAVIGATION_TRACE_PRESETS.forEach { (presetKey, colors) ->
-                val isSelected = presetKey == selectedPresetKey
-                Box(
-                    modifier = Modifier
-                        .padding(end = 12.dp)
-                        .size(40.dp)
-                        .clip(CircleShape)
-                        .background(Color(android.graphics.Color.parseColor(colors.progressColor)))
-                        .border(
-                            width = if (isSelected) 3.dp else 1.dp,
-                            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
-                            shape = CircleShape,
-                        )
-                        .clickable {
-                            selectedPresetKey = presetKey
+/** A labeled switch row bound to [ItinerarySession.optionEnabled]. */
+@Composable
+private fun ItineraryOptionSwitch(session: ItinerarySession, @StringRes labelRes: Int) {
+    Spacer(modifier = Modifier.height(16.dp))
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(text = stringResource(labelRes), modifier = Modifier.weight(1f))
+        Switch(checked = session.optionEnabled, onCheckedChange = { session.optionEnabled = it })
+    }
+}
+
+/**
+ * FAB-triggered control for `compute-navigation`: [ItineraryControls] calling
+ * [WebView.computeNavigation] with `isAccessible = false`. A failed computation (bad/unreachable
+ * Place ID) surfaces [navigationError] below the fields. See docs/features/compute-navigation.md.
+ */
+@Composable
+fun ComputeNavigationOverlay(session: ItinerarySession, webView: WebView?, navigationError: String?) {
+    ItineraryControls(session, webView, navigationError, onItinerary = { view, origin, destination ->
+        view.computeNavigation(origin, destination, false)
+    })
+}
+
+/**
+ * FAB-triggered control for `custom-navigation-trace`: [ItineraryControls] plus one color chip per
+ * [NAVIGATION_TRACE_PRESETS] entry, applying [WebView.updateNavigationTraceStyle]
+ * (`venue.updateNavigationTrace()` under the hood) to whatever trace is displayed (a no-op if none
+ * is). "Itinerary" also applies the selected preset right after drawing the trace: the SDK only
+ * builds a trace in its own default look, so this second call is always needed for anything but
+ * the default. See docs/features/custom-navigation-trace.md.
+ */
+@Composable
+fun CustomNavigationTraceOverlay(session: ItinerarySession, webView: WebView?, navigationError: String?) {
+    ItineraryControls(
+        session = session,
+        webView = webView,
+        navigationError = navigationError,
+        onItinerary = { view, origin, destination ->
+            view.computeNavigation(origin, destination, false)
+            view.updateNavigationTraceStyle(NAVIGATION_TRACE_PRESETS.getValue(session.tracePresetKey))
+        },
+        extraContent = {
+            Spacer(modifier = Modifier.height(16.dp))
+            Text(
+                text = stringResource(R.string.trace_color_label),
+                style = MaterialTheme.typography.labelLarge,
+            )
+            FlowRow(modifier = Modifier.fillMaxWidth()) {
+                NAVIGATION_TRACE_PRESETS.forEach { (presetKey, colors) ->
+                    ColorChip(
+                        hex = colors.progressColor,
+                        name = stringResource(colors.nameRes),
+                        selected = presetKey == session.tracePresetKey,
+                        onClick = {
+                            session.tracePresetKey = presetKey
                             webView?.updateNavigationTraceStyle(colors)
                         },
-                )
-            }
-        }
-        Spacer(modifier = Modifier.height(4.dp))
-        Text(text = selectedPresetKey, style = MaterialTheme.typography.bodySmall)
-    }
-}
-
-/**
- * FAB-triggered control for `navigation-exclude-modalities`: reuses `compute-navigation`'s
- * itinerary fields/buttons verbatim ([WebView.computeNavigation] replaced by
- * [WebView.computeNavigationExcludingModalities], same `navigationError` surfacing) rather than
- * duplicating that logic, then adds a single switch below, "Avoid elevator" — same reuse pattern
- * as [CustomNavigationTraceOverlay] adding its color row below the same fields. Unlike that
- * switch-per-toggle in [UiPartVisibilityOverlay], [excludeElevator] is only read when "Itinerary"
- * is pressed, not applied live on toggle: there is no already-drawn trace to react to (toggling
- * mid-display would require recomputing anyway), so recomputing immediately would just be a more
- * surprising way to do the same thing "Itinerary" already does explicitly. See
- * docs/features/navigation-exclude-modalities.md.
- */
-@Composable
-fun NavigationExcludeModalitiesOverlay(webView: WebView?, navigationError: String?) {
-    var origin by remember { mutableStateOf(DemoMap.EXCLUDE_MODALITIES_FROM) }
-    var destination by remember { mutableStateOf(DemoMap.EXCLUDE_MODALITIES_TO) }
-    var excludeElevator by remember { mutableStateOf(false) }
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(16.dp),
-    ) {
-        Row(modifier = Modifier.fillMaxWidth()) {
-            OutlinedTextField(
-                value = origin,
-                onValueChange = { origin = it },
-                label = { Text("From (place ID)") },
-                singleLine = true,
-                modifier = Modifier.weight(1f),
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            OutlinedTextField(
-                value = destination,
-                onValueChange = { destination = it },
-                label = { Text("To (place ID)") },
-                singleLine = true,
-                modifier = Modifier.weight(1f),
-            )
-        }
-        Spacer(modifier = Modifier.height(8.dp))
-        Row(modifier = Modifier.fillMaxWidth()) {
-            Button(
-                onClick = {
-                    webView?.computeNavigationExcludingModalities(
-                        origin.trim(),
-                        destination.trim(),
-                        false,
-                        excludeElevator,
                     )
-                },
-                enabled = origin.isNotBlank() && destination.isNotBlank(),
-            ) {
-                Text("Itinerary")
+                }
             }
-            Spacer(modifier = Modifier.width(8.dp))
-            Button(onClick = { webView?.clearNavigation() }) {
-                Text("Clear")
-            }
-        }
-        if (navigationError != null) {
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(text = navigationError, color = MaterialTheme.colorScheme.error)
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(text = "Avoid elevator", modifier = Modifier.weight(1f))
-            Switch(checked = excludeElevator, onCheckedChange = { excludeElevator = it })
-        }
-    }
+        },
+    )
 }
 
 /**
- * FAB-triggered control for `accessible-mode`: reuses `compute-navigation`'s itinerary
- * fields/buttons verbatim ([WebView.computeNavigation], same `navigationError` surfacing) rather
- * than duplicating that logic, then adds a single switch below, "Accessible route" — same reuse
- * pattern as [NavigationExcludeModalitiesOverlay]'s "Avoid elevator" switch, except this toggles
- * [computeNavigation]'s existing `isAccessible` argument directly (always passed `false` by every
- * other call site in this file) rather than needing a new bridge method: `isAccessible` is the
- * opposite of `navigation-exclude-modalities`'s `['lift']` exclusion — it tells the SDK itself to
- * exclude the venue's own published accessible-route attributes/modalities from routing, so the
- * computed route avoids stairs instead of the elevator. Like [excludeElevator] above,
- * [accessible] is only read when "Itinerary" is pressed, not applied live on toggle. See
- * docs/features/accessible-mode.md.
+ * FAB-triggered control for `navigation-exclude-modalities`: [ItineraryControls] plus an "Avoid
+ * elevator" switch, read when "Itinerary" is pressed (not applied live: changing it means
+ * recomputing, which is what "Itinerary" does), passed to
+ * [WebView.computeNavigationExcludingModalities]. See docs/features/navigation-exclude-modalities.md.
  */
 @Composable
-fun AccessibleModeOverlay(webView: WebView?, navigationError: String?) {
-    var origin by remember { mutableStateOf(DemoMap.ACCESSIBLE_FROM) }
-    var destination by remember { mutableStateOf(DemoMap.ACCESSIBLE_TO) }
-    var accessible by remember { mutableStateOf(false) }
+fun NavigationExcludeModalitiesOverlay(session: ItinerarySession, webView: WebView?, navigationError: String?) {
+    ItineraryControls(
+        session = session,
+        webView = webView,
+        navigationError = navigationError,
+        onItinerary = { view, origin, destination ->
+            view.computeNavigationExcludingModalities(origin, destination, false, session.optionEnabled)
+        },
+        extraContent = { ItineraryOptionSwitch(session, R.string.avoid_elevator_label) },
+    )
+}
 
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(16.dp),
-    ) {
-        Row(modifier = Modifier.fillMaxWidth()) {
-            OutlinedTextField(
-                value = origin,
-                onValueChange = { origin = it },
-                label = { Text("From (place ID)") },
-                singleLine = true,
-                modifier = Modifier.weight(1f),
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            OutlinedTextField(
-                value = destination,
-                onValueChange = { destination = it },
-                label = { Text("To (place ID)") },
-                singleLine = true,
-                modifier = Modifier.weight(1f),
-            )
-        }
-        Spacer(modifier = Modifier.height(8.dp))
-        Row(modifier = Modifier.fillMaxWidth()) {
-            Button(
-                onClick = { webView?.computeNavigation(origin.trim(), destination.trim(), accessible) },
-                enabled = origin.isNotBlank() && destination.isNotBlank(),
-            ) {
-                Text("Itinerary")
-            }
-            Spacer(modifier = Modifier.width(8.dp))
-            Button(onClick = { webView?.clearNavigation() }) {
-                Text("Clear")
-            }
-        }
-        if (navigationError != null) {
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(text = navigationError, color = MaterialTheme.colorScheme.error)
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(text = "Accessible route", modifier = Modifier.weight(1f))
-            Switch(checked = accessible, onCheckedChange = { accessible = it })
-        }
-    }
+/**
+ * FAB-triggered control for `accessible-mode`: [ItineraryControls] plus an "Accessible route"
+ * switch, passed as [WebView.computeNavigation]'s `isAccessible` when "Itinerary" is pressed. With
+ * it on, the SDK only uses segments the venue marks as accessible, so the computed route avoids
+ * stairs. See docs/features/accessible-mode.md.
+ */
+@Composable
+fun AccessibleModeOverlay(session: ItinerarySession, webView: WebView?, navigationError: String?) {
+    ItineraryControls(
+        session = session,
+        webView = webView,
+        navigationError = navigationError,
+        onItinerary = { view, origin, destination ->
+            view.computeNavigation(origin, destination, session.optionEnabled)
+        },
+        extraContent = { ItineraryOptionSwitch(session, R.string.accessible_route_label) },
+    )
 }
 
 /** A single POI carried by the `AndroidBridge.onPoiClick` payload. See docs/features/poi-click.md. */
@@ -1171,7 +1167,7 @@ fun PoiClickOverlay(pois: List<PoiClickInfo>) {
             .padding(16.dp),
     ) {
         if (pois.isEmpty()) {
-            Text("Tap a POI on the map to see its details.")
+            Text(stringResource(R.string.poi_click_empty))
             return@Column
         }
         pois.forEachIndexed { index, poi ->
@@ -1180,27 +1176,28 @@ fun PoiClickOverlay(pois: List<PoiClickInfo>) {
                 text = poi.name.ifBlank { poi.id },
                 style = MaterialTheme.typography.titleMedium,
             )
-            Text(text = "ID: ${poi.id}", style = MaterialTheme.typography.bodyMedium)
+            Text(text = stringResource(R.string.poi_click_id, poi.id), style = MaterialTheme.typography.bodyMedium)
         }
     }
 }
 
 /**
+ * Screen-level state of `ui-part-visibility`: the visibility last set for each of the 5
+ * [UI_PART_TOGGLES] parts, all visible at first, matching the SDK's own default. Held outside the
+ * panel so its switches still match the map after a close/reopen.
+ */
+@Stable
+class UiPartVisibilitySession {
+    val visibility = mutableStateMapOf(*UI_PART_TOGGLES.map { (uiPart, _) -> uiPart to true }.toTypedArray())
+}
+
+/**
  * FAB-triggered control for `ui-part-visibility`: one switch per [UI_PART_TOGGLES] entry, each
  * calling [WebView.setUiPartVisible] on toggle so the effect is visible immediately on the map
- * behind the sheet. All 5 default to visible/on, matching the SDK's own default — nothing is
- * hidden until the user flips a switch. Local state only: this overlay does not read back
- * `view.isUIPartVisible`, so re-opening the sheet after leaving and returning to this screen still
- * shows all switches on regardless of the map's actual state (the WebView, and the underlying
- * view/venue, are recreated on every screen visit, see `FeatureMapScreen`'s kdoc — so in practice
- * the two stay in sync anyway). See docs/features/ui-part-visibility.md.
+ * behind the panel. See docs/features/ui-part-visibility.md.
  */
 @Composable
-fun UiPartVisibilityOverlay(webView: WebView?) {
-    val visibility = remember {
-        mutableStateMapOf(*UI_PART_TOGGLES.map { (uiPart, _) -> uiPart to true }.toTypedArray())
-    }
-
+fun UiPartVisibilityOverlay(session: UiPartVisibilitySession, webView: WebView?) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -1215,9 +1212,9 @@ fun UiPartVisibilityOverlay(webView: WebView?) {
             ) {
                 Text(text = stringResource(labelRes), modifier = Modifier.weight(1f))
                 Switch(
-                    checked = visibility[uiPart] == true,
+                    checked = session.visibility[uiPart] == true,
                     onCheckedChange = { isVisible ->
-                        visibility[uiPart] = isVisible
+                        session.visibility[uiPart] = isVisible
                         webView?.setUiPartVisible(uiPart, isVisible)
                     },
                 )
@@ -1227,21 +1224,29 @@ fun UiPartVisibilityOverlay(webView: WebView?) {
 }
 
 /**
+ * Screen-level state of `native-ui-replacement`: whether the SDK's own floor selector is shown.
+ * Starts off, matching the hide-on-load call made for this screen (see `MainActivity.kt`).
+ */
+@Stable
+class NativeUiReplacementSession {
+    var showSdkFloorSelector by mutableStateOf(false)
+}
+
+/**
  * FAB-triggered control for `native-ui-replacement`: a single switch, "Show SDK's own floor
- * selector" — defaults to off, matching the hide-on-load call [FeatureMapScreen]'s `onMapReady`
- * hook makes for this screen (see `MainActivity.kt`), via the same [WebView.setUiPartVisible]
- * used by [UiPartVisibilityOverlay] — so the SDK's own widget stays hidden unless the visitor
- * flips this switch on, letting them compare both driving the same floor live.
+ * selector", calling the same [WebView.setUiPartVisible] as [UiPartVisibilityOverlay], so the SDK's
+ * own widget stays hidden unless the visitor flips it on to compare both driving the same floor.
  *
- * Below the switch, [FloorSelectorOverlay] is reused verbatim, unaware of this switch's state:
- * the app's own native floor list stays fully functional regardless of it, demonstrating that
- * it's already a complete replacement for the SDK's widget, not merely a duplicate shown next to
- * it. See docs/features/native-ui-replacement.md.
+ * Below the switch, [FloorSelectorOverlay] is reused as-is, unaware of this switch's state: the
+ * app's own native floor list stays fully functional regardless of it, demonstrating that it is a
+ * complete replacement for the SDK's widget. See docs/features/native-ui-replacement.md.
  */
 @Composable
-fun NativeUiReplacementOverlay(webView: WebView?, floorSelector: FloorSelectorState) {
-    var showSdkFloorSelector by remember { mutableStateOf(false) }
-
+fun NativeUiReplacementOverlay(
+    session: NativeUiReplacementSession,
+    webView: WebView?,
+    floorSelector: FloorSelectorState,
+) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -1258,9 +1263,9 @@ fun NativeUiReplacementOverlay(webView: WebView?, floorSelector: FloorSelectorSt
                 modifier = Modifier.weight(1f),
             )
             Switch(
-                checked = showSdkFloorSelector,
+                checked = session.showSdkFloorSelector,
                 onCheckedChange = { isVisible ->
-                    showSdkFloorSelector = isVisible
+                    session.showSdkFloorSelector = isVisible
                     webView?.setUiPartVisible("floorSelector", isVisible)
                 },
             )
@@ -1285,7 +1290,7 @@ fun NativeUiReplacementOverlay(webView: WebView?, floorSelector: FloorSelectorSt
  * [start] resolves both POI ids in one round trip via [WebView.resolvePositions]; the response is
  * fed back through [onPositionsResolved] (by [TrackedPositionSimulationHost], which sees every
  * bridge response even while the sheet is closed). A `null` slot ("POI not found") surfaces
- * [errorMessage] instead of starting anything.
+ * [error] instead of starting anything.
  * See docs/features/simulated-position.md.
  */
 @Stable
@@ -1299,7 +1304,7 @@ class TrackedPositionSession(
     var radiusMeters by mutableFloatStateOf(initialRadiusMeters)
     var isRunning by mutableStateOf(false)
         private set
-    var errorMessage by mutableStateOf<String?>(null)
+    var error by mutableStateOf<UiText?>(null)
         private set
     internal var activePositions by mutableStateOf<Pair<ResolvedPosition, ResolvedPosition>?>(null)
         private set
@@ -1307,12 +1312,11 @@ class TrackedPositionSession(
     // `requestId` guards against a stale response from a superseded request overwriting the outcome
     // of a more recent one (both are near-instant in practice, but this costs nothing).
     private var pendingRequestId: Int? = null
-    private var nextRequestId = 0
 
     fun start(webView: WebView?) {
         if (isRunning) return
-        errorMessage = null
-        val requestId = nextRequestId++
+        error = null
+        val requestId = nextBridgeRequestId()
         pendingRequestId = requestId
         webView?.resolvePositions(requestId, originId.trim(), destinationId.trim())
     }
@@ -1329,10 +1333,10 @@ class TrackedPositionSession(
         val origin = result.origin
         val destination = result.destination
         if (origin == null || destination == null) {
-            errorMessage = "POI not found"
+            error = UiText(R.string.poi_not_found)
             isRunning = false
         } else {
-            errorMessage = null
+            error = null
             activePositions = origin to destination
             isRunning = true
         }
@@ -1354,7 +1358,7 @@ fun accuracyCircleStyleSession() = TrackedPositionSession(
  * [TrackedPositionSession.radiusMeters] fresh on every tick, so moving the slider while running
  * changes the radius on the *next* tick with no restart needed. Stop (or leaving the screen, which
  * cancels this effect and tears down the WebView) calls [WebView.stopTrackedPosition] via the
- * effect's `finally` block, same cleanup-on-cancellation idiom as [OccupancySimulationOverlay].
+ * effect's `finally` block, same cleanup-on-cancellation idiom as [OccupancySimulationHost].
  * [onRunningChanged] reports every start/stop transition (e.g. geofencing's zone resolve/clear);
  * [onTick] runs with every injected point.
  */
@@ -1431,27 +1435,15 @@ private fun TrackedPositionSimulationControls(
             .fillMaxWidth()
             .padding(16.dp),
     ) {
-        Row(modifier = Modifier.fillMaxWidth()) {
-            OutlinedTextField(
-                value = session.originId,
-                onValueChange = { session.originId = it },
-                label = { Text("Origin POI ID") },
-                singleLine = true,
-                enabled = !isRunning,
-                modifier = Modifier.weight(1f),
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            OutlinedTextField(
-                value = session.destinationId,
-                onValueChange = { session.destinationId = it },
-                label = { Text("Destination POI ID") },
-                singleLine = true,
-                enabled = !isRunning,
-                modifier = Modifier.weight(1f),
-            )
-        }
+        FromToFields(
+            from = session.originId,
+            onFromChange = { session.originId = it },
+            to = session.destinationId,
+            onToChange = { session.destinationId = it },
+            enabled = !isRunning,
+        )
         Spacer(modifier = Modifier.height(8.dp))
-        Text("Accuracy radius: ${session.radiusMeters.roundToInt()} m")
+        Text(stringResource(R.string.tracking_radius_label, session.radiusMeters.roundToInt()))
         Slider(
             value = session.radiusMeters,
             onValueChange = { session.radiusMeters = it },
@@ -1463,12 +1455,9 @@ private fun TrackedPositionSimulationControls(
             enabled = isRunning ||
                 (session.originId.isNotBlank() && session.destinationId.isNotBlank() && startEnabled),
         ) {
-            Text(if (isRunning) "Stop simulated position" else "Start simulated position")
+            Text(stringResource(if (isRunning) R.string.tracking_stop else R.string.tracking_start))
         }
-        session.errorMessage?.let { message ->
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(text = message, color = MaterialTheme.colorScheme.error)
-        }
+        ErrorText(session.error?.resolve())
         extraContent()
     }
 }
@@ -1509,7 +1498,7 @@ fun CameraLockOnPositionOverlay(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(text = "Recenter camera on position", modifier = Modifier.weight(1f))
+                Text(text = stringResource(R.string.camera_lock_switch_label), modifier = Modifier.weight(1f))
                 Switch(
                     checked = isCameraLocked,
                     enabled = session.isRunning,
@@ -1546,9 +1535,9 @@ private const val ACCURACY_CIRCLE_STYLE_DEFAULT_RADIUS_METERS = 6f
 /** Color presets offered for the tracked position (hex, label resource). */
 private val POSITION_TRACKER_COLOR_PRESETS = listOf(
     POSITION_TRACKER_DEFAULT_COLOR to R.string.accuracy_circle_style_color_default,
-    "#e53935" to R.string.accuracy_circle_style_color_red,
-    "#43a047" to R.string.accuracy_circle_style_color_green,
-    "#8e24aa" to R.string.accuracy_circle_style_color_purple,
+    "#E53935" to R.string.color_red,
+    "#43A047" to R.string.color_green,
+    "#8E24AA" to R.string.color_purple,
 )
 
 /**
@@ -1559,7 +1548,8 @@ private val POSITION_TRACKER_COLOR_PRESETS = listOf(
  * [WebView.setPositionTrackerStyle] immediately, running or not: the SDK applies it at the next
  * inject (every tick while running), and the JS side re-applies it on each Start since the SDK
  * resets it on every stop. [style] is hoisted by the caller so it survives the sheet being closed
- * and reopened. See docs/features/accuracy-circle-style.md.
+ * and reopened, and only changes once the SDK has accepted the new style. See
+ * docs/features/accuracy-circle-style.md.
  */
 @Composable
 fun AccuracyCircleStyleOverlay(
@@ -1569,8 +1559,7 @@ fun AccuracyCircleStyleOverlay(
     onStyleChange: (PositionTrackerStyle) -> Unit,
 ) {
     val applyStyle = { newStyle: PositionTrackerStyle ->
-        onStyleChange(newStyle)
-        webView?.setPositionTrackerStyle(newStyle.color, newStyle.opacity)
+        webView?.setPositionTrackerStyle(newStyle.color, newStyle.opacity) { onStyleChange(newStyle) }
     }
 
     TrackedPositionSimulationControls(
@@ -1582,13 +1571,13 @@ fun AccuracyCircleStyleOverlay(
             // above it while tweaking the style.
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = stringResource(R.string.accuracy_circle_style_color_label),
+                    text = stringResource(R.string.color_label),
                     style = MaterialTheme.typography.labelLarge,
                     modifier = Modifier.padding(end = 8.dp),
                 )
                 FlowRow(modifier = Modifier.weight(1f)) {
                     POSITION_TRACKER_COLOR_PRESETS.forEach { (hex, labelRes) ->
-                        ThemeColorChip(
+                        ColorChip(
                             hex = hex,
                             name = stringResource(labelRes),
                             selected = hex.equals(style.color, ignoreCase = true),
@@ -1623,93 +1612,92 @@ fun AccuracyCircleStyleOverlay(
 
 /**
  * FAB-triggered control for `clickable-surface`: a Place ID field plus "Enable"/"Disable" buttons
- * calling [WebView.setSurfaceInteractive] — same two-button pattern as [GoToPoiOverlay]'s
- * "Go"/"Clear". Once enabled, the SDK itself handles the hover/selection color swap when the
- * surface is tapped on the map; this overlay has no click listener of its own for that. See
- * docs/features/clickable-surface.md.
+ * calling [WebView.setSurfaceInteractive]. Once enabled, the SDK itself handles the
+ * hover/selection color swap when the surface is tapped on the map; this control has no click
+ * listener of its own for that. See docs/features/clickable-surface.md.
  */
 @Composable
-fun ClickableSurfaceOverlay(webView: WebView?) {
-    var placeId by remember { mutableStateOf(DemoMap.CLICKABLE_SURFACE_PLACE_ID) }
-
+fun ClickableSurfaceOverlay(session: PlaceIdSession, webView: WebView?) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .padding(16.dp),
     ) {
         OutlinedTextField(
-            value = placeId,
-            onValueChange = { placeId = it },
-            label = { Text("Place ID") },
+            value = session.placeId,
+            onValueChange = { session.placeId = it },
+            label = { Text(stringResource(R.string.field_place_id)) },
             singleLine = true,
             modifier = Modifier.weight(1f),
         )
         Spacer(modifier = Modifier.width(8.dp))
         Button(
-            onClick = { webView?.setSurfaceInteractive(placeId.trim(), true) },
-            enabled = placeId.isNotBlank(),
+            onClick = { webView?.setSurfaceInteractive(session.placeId.trim(), true) },
+            enabled = session.placeId.isNotBlank(),
         ) {
-            Text("Enable")
+            Text(stringResource(R.string.action_enable))
         }
         Spacer(modifier = Modifier.width(8.dp))
         Button(
-            onClick = { webView?.setSurfaceInteractive(placeId.trim(), false) },
-            enabled = placeId.isNotBlank(),
+            onClick = { webView?.setSurfaceInteractive(session.placeId.trim(), false) },
+            enabled = session.placeId.isNotBlank(),
         ) {
-            Text("Disable")
+            Text(stringResource(R.string.action_disable))
         }
+    }
+}
+
+/**
+ * Screen-level state of `custom-data`: the place id and the last loaded result. [onLoaded] is fed
+ * every `AndroidBridge.onCustomDataLoaded` response at screen level, so a response arriving while
+ * the panel is closed is not lost. See docs/features/custom-data.md.
+ */
+@Stable
+class CustomDataSession(initialPlaceId: String) {
+    var placeId by mutableStateOf(initialPlaceId)
+
+    /** `null` until a load completes; then [CustomDataResult.customData] (`null` = POI not found). */
+    var result by mutableStateOf<CustomDataResult?>(null)
+        private set
+    private var pendingRequestId: Int? = null
+
+    fun load(webView: WebView?, targetPlaceId: String) {
+        result = null
+        val requestId = nextBridgeRequestId()
+        pendingRequestId = requestId
+        webView?.loadCustomData(requestId, targetPlaceId)
+    }
+
+    internal fun onLoaded(response: CustomDataResult) {
+        if (response.requestId != pendingRequestId) return
+        pendingRequestId = null
+        result = response
     }
 }
 
 /**
  * FAB-triggered control for `custom-data`: a Place ID field plus a single "Load" button that calls
  * [WebView.loadCustomData] — combining `venue.refreshCustomData()` and `venue.getPOICustomData()`
- * into one round trip, since a demo has no reason to expose them as two separate steps. Above the
- * field, one chip per [DemoMap.CUSTOM_DATA_SAMPLE_PLACE_IDS] entry fills it and immediately triggers Load,
- * since free-typing a valid id is otherwise guesswork; the field still accepts free-text entry for
- * any other id. `requestId` guards against a stale response overwriting a more recent request's
- * outcome, same pattern as [TrackedPositionSimulationControls]. All three outcomes are rendered as
- * normal states, not errors: every key/value pair when [CustomDataResult.customData] is non-empty,
- * "No custom data for this POI" when it resolves to an empty map, and "POI not found" when it's
- * `null`. See docs/features/custom-data.md.
+ * into one round trip. Above the field, one chip per [DemoMap.CUSTOM_DATA_SAMPLE_PLACE_IDS] entry
+ * fills it and loads it right away. All three outcomes are normal states, not errors: every
+ * key/value pair, "No custom data for this POI" (empty map) or "POI not found" (`null`). See
+ * docs/features/custom-data.md.
  */
 @Composable
-fun CustomDataOverlay(webView: WebView?, customDataLoaded: CustomDataResult?) {
-    var placeId by remember { mutableStateOf(DemoMap.CUSTOM_DATA_PLACE_ID) }
-    var pendingRequestId by remember { mutableStateOf<Int?>(null) }
-    var nextRequestId by remember { mutableStateOf(0) }
-    var result by remember { mutableStateOf<Map<String, String>?>(null) }
-    var hasResult by remember { mutableStateOf(false) }
-
-    LaunchedEffect(customDataLoaded) {
-        val response = customDataLoaded ?: return@LaunchedEffect
-        if (response.requestId != pendingRequestId) return@LaunchedEffect
-        pendingRequestId = null
-        result = response.customData
-        hasResult = true
-    }
-
-    fun load(targetPlaceId: String) {
-        hasResult = false
-        result = null
-        val requestId = nextRequestId++
-        pendingRequestId = requestId
-        webView?.loadCustomData(requestId, targetPlaceId)
-    }
-
+fun CustomDataOverlay(session: CustomDataSession, webView: WebView?) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(16.dp),
     ) {
-        Text("Known POIs with real data:", style = MaterialTheme.typography.bodySmall)
+        Text(stringResource(R.string.custom_data_samples_label), style = MaterialTheme.typography.bodySmall)
         Spacer(modifier = Modifier.height(4.dp))
         FlowRow(modifier = Modifier.fillMaxWidth()) {
             DemoMap.CUSTOM_DATA_SAMPLE_PLACE_IDS.forEach { sampleId ->
                 OutlinedButton(
                     onClick = {
-                        placeId = sampleId
-                        load(sampleId)
+                        session.placeId = sampleId
+                        session.load(webView, sampleId)
                     },
                     modifier = Modifier.padding(end = 8.dp, bottom = 4.dp),
                 ) {
@@ -1720,26 +1708,27 @@ fun CustomDataOverlay(webView: WebView?, customDataLoaded: CustomDataResult?) {
         Spacer(modifier = Modifier.height(8.dp))
         Row(modifier = Modifier.fillMaxWidth()) {
             OutlinedTextField(
-                value = placeId,
-                onValueChange = { placeId = it },
-                label = { Text("Place ID") },
+                value = session.placeId,
+                onValueChange = { session.placeId = it },
+                label = { Text(stringResource(R.string.field_place_id)) },
                 singleLine = true,
                 modifier = Modifier.weight(1f),
             )
             Spacer(modifier = Modifier.width(8.dp))
             Button(
-                onClick = { load(placeId.trim()) },
-                enabled = placeId.isNotBlank(),
+                onClick = { session.load(webView, session.placeId.trim()) },
+                enabled = session.placeId.isNotBlank(),
             ) {
-                Text("Load")
+                Text(stringResource(R.string.action_load))
             }
         }
-        if (hasResult) {
+        val result = session.result
+        if (result != null) {
             Spacer(modifier = Modifier.height(12.dp))
-            val data = result
+            val data = result.customData
             when {
-                data == null -> Text("POI not found", color = MaterialTheme.colorScheme.error)
-                data.isEmpty() -> Text("No custom data for this POI")
+                data == null -> Text(stringResource(R.string.poi_not_found), color = MaterialTheme.colorScheme.error)
+                data.isEmpty() -> Text(stringResource(R.string.custom_data_empty))
                 else -> data.forEach { (key, value) ->
                     Text(text = "$key: $value", style = MaterialTheme.typography.bodyMedium)
                 }
@@ -1749,138 +1738,157 @@ fun CustomDataOverlay(webView: WebView?, customDataLoaded: CustomDataResult?) {
 }
 
 /**
- * FAB-triggered control for `category-highlight`: one [FilterChip] per `venue.categories` entry
- * (label = [CategoryInfo.label], the human-readable name resolved via `translateCategory` on the
- * JS side — [CategoryInfo.id] is the raw identifier used for filtering/highlighting, not display),
- * requested once via [WebView.getCategories] as soon as the sheet is given a [webView] — `requestId` guards
- * against a stale response the same way as [CustomDataOverlay]. Tapping a chip calls
- * [WebView.highlightCategory]; tapping the already-selected chip again, or the "Clear" button
- * shown below the chips once one is selected, calls [WebView.clearCategoryHighlight] instead. Only
- * one category is ever selected at a time — [WebView.highlightCategory] itself reverts the
- * previous selection on the JS side before applying the new one, so this overlay only needs to
- * track which chip is currently selected for its own rendering. See
- * docs/features/category-highlight.md.
+ * Screen-level state of `category-highlight`: the venue's categories (requested the first time the
+ * panel opens) and the highlighted one, so the panel still shows the selection the map shows after
+ * a close/reopen. Only one category is highlighted at a time — [WebView.highlightCategory] reverts
+ * the previous one on the JS side. See docs/features/category-highlight.md.
  */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun CategoryHighlightOverlay(webView: WebView?, categoriesLoaded: CategoriesResult?) {
-    var categories by remember { mutableStateOf<List<CategoryInfo>>(emptyList()) }
-    var pendingRequestId by remember { mutableStateOf<Int?>(null) }
-    var nextRequestId by remember { mutableStateOf(0) }
-    var selectedCategoryId by remember { mutableStateOf<String?>(null) }
+@Stable
+class CategoryHighlightSession {
+    var categories by mutableStateOf<List<CategoryInfo>>(emptyList())
+        private set
+    var selectedCategoryId by mutableStateOf<String?>(null)
+        private set
+    private var pendingRequestId: Int? = null
 
-    LaunchedEffect(webView) {
-        val view = webView ?: return@LaunchedEffect
-        val requestId = nextRequestId++
+    fun requestCategoriesIfNeeded(webView: WebView?) {
+        val view = webView ?: return
+        if (categories.isNotEmpty() || pendingRequestId != null) return
+        val requestId = nextBridgeRequestId()
         pendingRequestId = requestId
         view.getCategories(requestId)
     }
 
-    LaunchedEffect(categoriesLoaded) {
-        val response = categoriesLoaded ?: return@LaunchedEffect
-        if (response.requestId != pendingRequestId) return@LaunchedEffect
+    internal fun onCategoriesLoaded(response: CategoriesResult) {
+        if (response.requestId != pendingRequestId) return
         pendingRequestId = null
         categories = response.categories
     }
 
-    fun toggle(categoryId: String) {
-        if (selectedCategoryId == categoryId) {
-            webView?.clearCategoryHighlight()
-            selectedCategoryId = null
-        } else {
+    /** Highlights [categoryId], or clears the highlight if it is the selected one. */
+    fun toggle(webView: WebView?, categoryId: String) {
+        if (selectedCategoryId == categoryId) clear(webView) else {
             webView?.highlightCategory(categoryId)
             selectedCategoryId = categoryId
         }
     }
+
+    fun clear(webView: WebView?) {
+        webView?.clearCategoryHighlight()
+        selectedCategoryId = null
+    }
+}
+
+/**
+ * FAB-triggered control for `category-highlight`: one [FilterChip] per `venue.categories` entry
+ * (label = [CategoryInfo.label], the name resolved via `translateCategory` on the JS side;
+ * [CategoryInfo.id] is what filtering/highlighting uses). Tapping a chip calls
+ * [WebView.highlightCategory]; tapping the selected chip again, or "Clear", calls
+ * [WebView.clearCategoryHighlight]. See docs/features/category-highlight.md.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun CategoryHighlightOverlay(session: CategoryHighlightSession, webView: WebView?) {
+    LaunchedEffect(webView) { session.requestCategoriesIfNeeded(webView) }
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(16.dp),
     ) {
-        if (categories.isEmpty()) {
-            Text("Loading categories…")
+        if (session.categories.isEmpty()) {
+            Text(stringResource(R.string.categories_loading))
             return@Column
         }
         FlowRow(modifier = Modifier.fillMaxWidth()) {
-            categories.forEach { category ->
+            session.categories.forEach { category ->
                 FilterChip(
-                    selected = category.id == selectedCategoryId,
-                    onClick = { toggle(category.id) },
+                    selected = category.id == session.selectedCategoryId,
+                    onClick = { session.toggle(webView, category.id) },
                     label = { Text(category.label) },
                     modifier = Modifier.padding(end = 8.dp, bottom = 8.dp),
                 )
             }
         }
-        if (selectedCategoryId != null) {
+        if (session.selectedCategoryId != null) {
             Spacer(modifier = Modifier.height(8.dp))
-            OutlinedButton(
-                onClick = {
-                    webView?.clearCategoryHighlight()
-                    selectedCategoryId = null
-                },
-            ) {
-                Text("Clear")
+            OutlinedButton(onClick = { session.clear(webView) }) {
+                Text(stringResource(R.string.action_clear))
             }
         }
     }
 }
 
 /**
- * Turns a [DynamicPoiCreationResult.status] other than `"created"` into a human-readable message
- * for [DynamicPoiCrudOverlay] to show in place of the "Created: …" state.
+ * Screen-level state of `dynamic-poi-crud`: the three fields and the POI currently on the map
+ * ([trackedPoiId]/[trackedLabelText]), so after a close/reopen Update text and Remove still act on
+ * it and Create stays disabled (a second Create would otherwise replace the tracked POI on the JS
+ * side and leave the first one on the map for good). Only one dynamic POI is tracked at a time — a
+ * demo-side simplification, not an SDK limitation. See docs/features/dynamic-poi-crud.md.
  */
-private fun DynamicPoiCreationResult.errorMessageOrNull(): String? = when (status) {
-    "anchor-not-found" -> "Anchor POI not found."
-    "anchor-has-no-position" -> "This POI has no position to copy — pick a different anchor."
-    "duplicate-id" -> "A POI with this ID already exists — pick a different New POI ID."
-    "created" -> null
-    else -> message ?: "Could not create the POI."
-}
+@Stable
+class DynamicPoiCrudSession(initialLabelText: String) {
+    var newId by mutableStateOf(DemoMap.DYNAMIC_POI_NEW_ID)
+    var anchorId by mutableStateOf(DemoMap.ANCHOR_POI_ID)
+    var labelText by mutableStateOf(initialLabelText)
+    var trackedPoiId by mutableStateOf<String?>(null)
+        private set
+    var trackedLabelText by mutableStateOf<String?>(null)
+        private set
+    var error by mutableStateOf<UiText?>(null)
+        private set
+    private var pendingRequestId: Int? = null
 
-/**
- * FAB-triggered control for `dynamic-poi-crud`: "New POI ID", "Anchor POI ID" and "Label text"
- * fields plus Create/Update text/Remove buttons. Only one dynamic POI is tracked at a time — a
- * demo-side simplification, not an SDK limitation — so the two ID fields are disabled once one is
- * tracked, same "disable during a running state" idiom as
- * [TrackedPositionSimulationControls]'s ID fields. "Label text" stays editable throughout: it seeds
- * the label created by Create, and its current value is what Update text sends via
- * [WebView.updateDynamicPoiLabel] — the same field serves both actions, per the feature's design.
- * Create calls [WebView.createDynamicPoi] and waits for `AndroidBridge.onDynamicPoiCreated`
- * (`requestId` guards against a stale response the same way as [CustomDataOverlay]); its `"created"`
- * result seeds [trackedPoiId]/[trackedLabelText], any other status surfaces as a normal state via
- * [errorMessageOrNull] rather than a crash — including `POIAlreadyExistsError` on a duplicate New
- * POI ID. Remove calls [WebView.removeDynamicPoi] and clears all local tracking state; the SDK
- * itself cascades the removal to the attached label, no separate cleanup call needed here. See
- * docs/features/dynamic-poi-crud.md.
- */
-@Composable
-fun DynamicPoiCrudOverlay(webView: WebView?, dynamicPoiCreated: DynamicPoiCreationResult?) {
-    var newId by remember { mutableStateOf(DemoMap.DYNAMIC_POI_NEW_ID) }
-    var anchorId by remember { mutableStateOf(DemoMap.ANCHOR_POI_ID) }
-    val defaultLabelText = stringResource(R.string.dynamic_poi_default_label)
-    var labelText by remember { mutableStateOf(defaultLabelText) }
-    var trackedPoiId by remember { mutableStateOf<String?>(null) }
-    var trackedLabelText by remember { mutableStateOf<String?>(null) }
-    var pendingRequestId by remember { mutableStateOf<Int?>(null) }
-    var nextRequestId by remember { mutableStateOf(0) }
-    var errorMessage by remember { mutableStateOf<String?>(null) }
+    fun create(webView: WebView?) {
+        error = null
+        val requestId = nextBridgeRequestId()
+        pendingRequestId = requestId
+        webView?.createDynamicPoi(requestId, newId.trim(), anchorId.trim(), labelText.trim())
+    }
 
-    LaunchedEffect(dynamicPoiCreated) {
-        val response = dynamicPoiCreated ?: return@LaunchedEffect
-        if (response.requestId != pendingRequestId) return@LaunchedEffect
+    fun updateText(webView: WebView?) {
+        webView?.updateDynamicPoiLabel(labelText.trim())
+        trackedLabelText = labelText.trim()
+    }
+
+    fun remove(webView: WebView?) {
+        webView?.removeDynamicPoi()
+        trackedPoiId = null
+        trackedLabelText = null
+        error = null
+    }
+
+    internal fun onCreated(response: DynamicPoiCreationResult) {
+        if (response.requestId != pendingRequestId) return
         pendingRequestId = null
-        val error = response.errorMessageOrNull()
-        if (error != null) {
-            errorMessage = error
-        } else {
-            errorMessage = null
+        error = when (response.status) {
+            "created" -> null
+            "anchor-not-found" -> UiText(R.string.dynamic_poi_anchor_not_found)
+            "anchor-has-no-position" -> UiText(R.string.dynamic_poi_anchor_no_position)
+            "duplicate-id" -> UiText(R.string.dynamic_poi_duplicate_id)
+            else -> response.message?.let { UiText(R.string.raw_message, listOf(it)) }
+                ?: UiText(R.string.dynamic_poi_create_failed)
+        }
+        if (response.status == "created") {
             trackedPoiId = response.id
             trackedLabelText = response.text
         }
     }
+}
 
-    val hasTrackedPoi = trackedPoiId != null
+/**
+ * FAB-triggered control for `dynamic-poi-crud`: "New POI ID", "Anchor POI ID" and "Label text"
+ * fields plus Create/Update text/Remove buttons, bound to the screen-level [DynamicPoiCrudSession].
+ * The two ID fields are disabled while a POI is tracked. "Label text" stays editable: it seeds the
+ * label created by Create, and its current value is what Update text sends via
+ * [WebView.updateDynamicPoiLabel]. Create calls [WebView.createDynamicPoi]; any outcome other than
+ * `"created"` (including `POIAlreadyExistsError` on a duplicate id) surfaces as a normal state.
+ * Remove calls [WebView.removeDynamicPoi]; the SDK cascades the removal to the attached label. See
+ * docs/features/dynamic-poi-crud.md.
+ */
+@Composable
+fun DynamicPoiCrudOverlay(session: DynamicPoiCrudSession, webView: WebView?) {
+    val hasTrackedPoi = session.trackedPoiId != null
 
     Column(
         modifier = Modifier
@@ -1889,27 +1897,27 @@ fun DynamicPoiCrudOverlay(webView: WebView?, dynamicPoiCreated: DynamicPoiCreati
     ) {
         Text(
             text = if (hasTrackedPoi) {
-                "Created: `$trackedPoiId` — \"$trackedLabelText\""
+                stringResource(R.string.dynamic_poi_created, session.trackedPoiId.orEmpty(), session.trackedLabelText.orEmpty())
             } else {
-                "No dynamic POI created yet."
+                stringResource(R.string.dynamic_poi_none)
             },
             style = MaterialTheme.typography.bodyMedium,
         )
         Spacer(modifier = Modifier.height(12.dp))
         Row(modifier = Modifier.fillMaxWidth()) {
             OutlinedTextField(
-                value = newId,
-                onValueChange = { newId = it },
-                label = { Text("New POI ID") },
+                value = session.newId,
+                onValueChange = { session.newId = it },
+                label = { Text(stringResource(R.string.field_new_poi_id)) },
                 singleLine = true,
                 enabled = !hasTrackedPoi,
                 modifier = Modifier.weight(1f),
             )
             Spacer(modifier = Modifier.width(8.dp))
             OutlinedTextField(
-                value = anchorId,
-                onValueChange = { anchorId = it },
-                label = { Text("Anchor POI ID") },
+                value = session.anchorId,
+                onValueChange = { session.anchorId = it },
+                label = { Text(stringResource(R.string.field_anchor_poi_id)) },
                 singleLine = true,
                 enabled = !hasTrackedPoi,
                 modifier = Modifier.weight(1f),
@@ -1917,62 +1925,44 @@ fun DynamicPoiCrudOverlay(webView: WebView?, dynamicPoiCreated: DynamicPoiCreati
         }
         Spacer(modifier = Modifier.height(8.dp))
         OutlinedTextField(
-            value = labelText,
-            onValueChange = { labelText = it },
-            label = { Text("Label text") },
+            value = session.labelText,
+            onValueChange = { session.labelText = it },
+            label = { Text(stringResource(R.string.field_label_text)) },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
         Spacer(modifier = Modifier.height(8.dp))
         Row(modifier = Modifier.fillMaxWidth()) {
             Button(
-                onClick = {
-                    errorMessage = null
-                    val requestId = nextRequestId++
-                    pendingRequestId = requestId
-                    webView?.createDynamicPoi(requestId, newId.trim(), anchorId.trim(), labelText.trim())
-                },
-                enabled = !hasTrackedPoi && newId.isNotBlank() && anchorId.isNotBlank() && labelText.isNotBlank(),
+                onClick = { session.create(webView) },
+                enabled = !hasTrackedPoi && session.newId.isNotBlank() && session.anchorId.isNotBlank() &&
+                    session.labelText.isNotBlank(),
             ) {
-                Text("Create")
+                Text(stringResource(R.string.action_create))
             }
             Spacer(modifier = Modifier.width(8.dp))
             Button(
-                onClick = {
-                    webView?.updateDynamicPoiLabel(labelText.trim())
-                    trackedLabelText = labelText.trim()
-                },
-                enabled = hasTrackedPoi && labelText.isNotBlank(),
+                onClick = { session.updateText(webView) },
+                enabled = hasTrackedPoi && session.labelText.isNotBlank(),
             ) {
-                Text("Update text")
+                Text(stringResource(R.string.action_update_text))
             }
             Spacer(modifier = Modifier.width(8.dp))
-            Button(
-                onClick = {
-                    webView?.removeDynamicPoi()
-                    trackedPoiId = null
-                    trackedLabelText = null
-                    errorMessage = null
-                },
-                enabled = hasTrackedPoi,
-            ) {
-                Text("Remove")
+            Button(onClick = { session.remove(webView) }, enabled = hasTrackedPoi) {
+                Text(stringResource(R.string.action_remove))
             }
         }
-        if (errorMessage != null) {
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(text = errorMessage.orEmpty(), color = MaterialTheme.colorScheme.error)
-        }
+        ErrorText(session.error?.resolve())
     }
 }
 
 /**
  * The two locale options offered by `runtime-locale`, paired with a human-readable label. The
  * shared demo map's `venue.translator.allLocales` is actually `['default', 'en', 'fr']`, but
- * `'default'` is a byte-identical duplicate of `'fr'` on this venue (confirmed against the
- * published map payload) — offering it as a third, seemingly distinct choice would be misleading,
- * so only these two SDK-valid locale codes are hardcoded here rather than populated from
- * `allLocales` at runtime. See docs/features/runtime-locale.md.
+ * `'default'` is a byte-identical duplicate of `'fr'` on this venue — offering it as a third,
+ * seemingly distinct choice would be misleading, so only these two SDK-valid locale codes are
+ * listed here rather than populated from `allLocales` at runtime. See
+ * docs/features/runtime-locale.md.
  */
 private val RUNTIME_LOCALE_OPTIONS = listOf(
     "en" to R.string.runtime_locale_option_english,
@@ -1980,93 +1970,80 @@ private val RUNTIME_LOCALE_OPTIONS = listOf(
 )
 
 /**
- * FAB-triggered control for `runtime-locale`: one button per [RUNTIME_LOCALE_OPTIONS] entry. The
- * venue's current locale is queried once via [WebView.getCurrentLocale] as soon as the sheet is
- * given a [webView] — `requestId` guards against a stale response the same way as
- * [CategoryHighlightOverlay] — and rendered as a filled, disabled [Button] (same "current state"
- * styling as [FloorSelectorOverlay]'s current floor); the other option is an [OutlinedButton].
- * Tapping the non-active option calls [WebView.setLocale], which switches `venue.currentLocale`
- * and re-renders every POI/label name and UI item already on screen — no separate refresh call
- * needed, per the SDK's own `Venue.setCurrentLocale` TSDoc. Both calls funnel through the same
- * `AndroidBridge.onLocaleResolved` callback ([localeResolved]), so a switch that somehow fails
- * surfaces [errorMessage] below the buttons instead of leaving the sheet showing a stale locale.
- * See docs/features/runtime-locale.md.
+ * Screen-level state of `runtime-locale`: the venue's current locale as last reported, and the
+ * error of the last switch. [refresh] asks the venue again (every time the panel opens — the SDK
+ * has no locale-change event); responses are fed to [onLocaleResolved] at screen level.
  */
-@Composable
-fun RuntimeLocaleOverlay(webView: WebView?, localeResolved: LocaleResult?) {
-    var currentLocale by remember { mutableStateOf<String?>(null) }
-    var pendingRequestId by remember { mutableStateOf<Int?>(null) }
-    var nextRequestId by remember { mutableStateOf(0) }
-    var errorMessage by remember { mutableStateOf<String?>(null) }
+@Stable
+class RuntimeLocaleSession {
+    var currentLocale by mutableStateOf<String?>(null)
+        private set
+    var error by mutableStateOf<UiText?>(null)
+        private set
+    private var pendingRequestId: Int? = null
 
-    LaunchedEffect(webView) {
-        val view = webView ?: return@LaunchedEffect
-        val requestId = nextRequestId++
+    fun refresh(webView: WebView?) {
+        val view = webView ?: return
+        val requestId = nextBridgeRequestId()
         pendingRequestId = requestId
         view.getCurrentLocale(requestId)
     }
 
-    LaunchedEffect(localeResolved) {
-        val response = localeResolved ?: return@LaunchedEffect
-        if (response.requestId != pendingRequestId) return@LaunchedEffect
-        pendingRequestId = null
-        if (response.locale != null) {
-            currentLocale = response.locale
-            errorMessage = null
-        } else {
-            errorMessage = response.errorMessage
-        }
-    }
-
-    fun select(locale: String) {
-        errorMessage = null
-        val requestId = nextRequestId++
+    fun select(webView: WebView?, locale: String) {
+        error = null
+        val requestId = nextBridgeRequestId()
         pendingRequestId = requestId
         webView?.setLocale(requestId, locale)
     }
+
+    internal fun onLocaleResolved(response: LocaleResult) {
+        if (response.requestId != pendingRequestId) return
+        pendingRequestId = null
+        if (response.locale != null) {
+            currentLocale = response.locale
+            error = null
+        } else {
+            error = response.errorUiText()
+        }
+    }
+}
+
+private fun LocaleResult.errorUiText(): UiText =
+    errorMessage?.let { UiText(R.string.raw_message, listOf(it)) } ?: UiText(R.string.locale_change_failed)
+
+/**
+ * FAB-triggered control for `runtime-locale`: one button per [RUNTIME_LOCALE_OPTIONS] entry, the
+ * venue's current locale highlighted (queried via [WebView.getCurrentLocale] when the panel opens).
+ * Tapping the other option calls [WebView.setLocale], which switches `venue.currentLocale` and
+ * re-renders every POI/label name and UI item already on screen — no separate refresh call needed.
+ * A failed switch surfaces an error below the buttons. See docs/features/runtime-locale.md.
+ */
+@Composable
+fun RuntimeLocaleOverlay(session: RuntimeLocaleSession, webView: WebView?) {
+    LaunchedEffect(webView) { session.refresh(webView) }
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(16.dp),
     ) {
-        RUNTIME_LOCALE_OPTIONS.forEach { (locale, labelRes) ->
-            val isCurrent = locale == currentLocale
-            val buttonModifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 4.dp)
-            if (isCurrent) {
-                Button(onClick = {}, enabled = false, modifier = buttonModifier) {
-                    Text(stringResource(labelRes))
-                }
-            } else {
-                OutlinedButton(onClick = { select(locale) }, modifier = buttonModifier) {
-                    Text(stringResource(labelRes))
-                }
-            }
-        }
-        if (errorMessage != null) {
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(text = errorMessage.orEmpty(), color = MaterialTheme.colorScheme.error)
-        }
+        CurrentOptionButtons(
+            options = RUNTIME_LOCALE_OPTIONS.map { (locale, labelRes) -> locale to stringResource(labelRes) },
+            current = session.currentLocale,
+            onSelect = { locale -> session.select(webView, locale) },
+        )
+        ErrorText(session.error?.resolve())
     }
 }
 
 /**
  * FAB-triggered control for `explore-mode`: one button per [EXPLORE_MODE_OPTIONS] entry, the
- * active one (per [currentExploreMode]) rendered as a filled, disabled [Button] — same
- * "current state" styling as [FloorSelectorOverlay]/[RuntimeLocaleOverlay] — every other option as
- * an [OutlinedButton]. Tapping a non-active option calls [WebView.setExploreMode]; the highlight
- * itself is never set optimistically from the tap — it only ever moves in response to
- * `AndroidBridge.onExploreModeChanged` (surfaced here as [currentExploreMode]), so it stays correct
- * even when the mode changes from map interaction rather than this overlay's own buttons — most
- * notably a click while in "building" mode, which the SDK auto-switches to "floor" on its own. See
- * docs/features/explore-mode.md.
- *
- * "Building" mode is this feature's flagship visual: the exploded "carousel" view of every opened
- * building's floors. It needs no building to already be open — the SDK falls back to the venue's
- * first building when none is — so tapping it is always enough to trigger the effect, no setup
- * required, which is the point for a sales-demo "wahou" moment.
+ * active one (per [currentExploreMode]) highlighted. Tapping another option calls
+ * [WebView.setExploreMode]; the highlight is never set optimistically from the tap — it only moves
+ * in response to `AndroidBridge.onExploreModeChanged`, so it stays correct when the mode changes
+ * from map interaction (a click while in "building" mode, which the SDK switches to "floor" on its
+ * own). "Building" — the exploded "carousel" view of the building's floors — needs no building to
+ * be open: the SDK falls back to the venue's first one. See docs/features/explore-mode.md.
  */
 @Composable
 fun ExploreModeOverlay(webView: WebView?, currentExploreMode: String?) {
@@ -2075,76 +2052,93 @@ fun ExploreModeOverlay(webView: WebView?, currentExploreMode: String?) {
             .fillMaxWidth()
             .padding(16.dp),
     ) {
-        EXPLORE_MODE_OPTIONS.forEach { (mode, labelRes) ->
-            val isCurrent = mode == currentExploreMode
-            val buttonModifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 4.dp)
-            if (isCurrent) {
-                Button(onClick = {}, enabled = false, modifier = buttonModifier) {
-                    Text(stringResource(labelRes))
-                }
-            } else {
-                OutlinedButton(
-                    onClick = { webView?.setExploreMode(mode) },
-                    modifier = buttonModifier,
-                ) {
-                    Text(stringResource(labelRes))
-                }
-            }
+        CurrentOptionButtons(
+            options = EXPLORE_MODE_OPTIONS.map { (mode, labelRes) -> mode to stringResource(labelRes) },
+            current = currentExploreMode,
+            onSelect = { mode -> webView?.setExploreMode(mode) },
+        )
+    }
+}
+
+/**
+ * The fixed keys demonstrated by `add-locale`, with the label shown above each one's value:
+ * `'search-for-anything'` is one of the SDK's own predefined UI keys (see `Translator.addLocale`'s
+ * doc), showing that `addLocale` can override the SDK's own built-in strings; `'welcome-message'` is
+ * a custom, app-defined key, showing the same store is a general-purpose one. The Spanish values
+ * live in `web/src/main.js`'s `ADD_LOCALE_RESOURCES`. See docs/features/add-locale.md.
+ */
+private val ADD_LOCALE_DEMO_KEYS = listOf(
+    "search-for-anything" to R.string.add_locale_sdk_key_label,
+    "welcome-message" to R.string.add_locale_custom_key_label,
+)
+
+/**
+ * Screen-level state of `add-locale`: the Spanish translations read back after `addLocale` (null
+ * until added), whether the venue's locale was switched to Spanish, and the last error. Responses
+ * to both calls (`onAddLocaleResolved`, and `onLocaleResolved` for the switch) are fed in at
+ * screen level.
+ */
+@Stable
+class AddLocaleSession {
+    var translations by mutableStateOf<Map<String, String>?>(null)
+        private set
+    var isSpanishDisplayed by mutableStateOf(false)
+        private set
+    var error by mutableStateOf<UiText?>(null)
+        private set
+    private var pendingAddRequestId: Int? = null
+    private var pendingSwitchRequestId: Int? = null
+
+    fun addSpanish(webView: WebView?) {
+        error = null
+        val requestId = nextBridgeRequestId()
+        pendingAddRequestId = requestId
+        webView?.addSpanishLocale(requestId)
+    }
+
+    fun switchToSpanish(webView: WebView?) {
+        error = null
+        val requestId = nextBridgeRequestId()
+        pendingSwitchRequestId = requestId
+        webView?.setLocale(requestId, "es")
+    }
+
+    internal fun onAddLocaleResolved(response: AddLocaleResult) {
+        if (response.requestId != pendingAddRequestId) return
+        pendingAddRequestId = null
+        if (response.translations != null) {
+            translations = response.translations
+            error = null
+        } else {
+            error = response.errorMessage?.let { UiText(R.string.raw_message, listOf(it)) }
+                ?: UiText(R.string.add_locale_failed)
+        }
+    }
+
+    internal fun onLocaleResolved(response: LocaleResult) {
+        if (response.requestId != pendingSwitchRequestId) return
+        pendingSwitchRequestId = null
+        if (response.locale != null) {
+            isSpanishDisplayed = response.locale == "es"
+            error = null
+        } else {
+            error = response.errorUiText()
         }
     }
 }
 
 /**
- * The fixed key/value dictionary demonstrated by `add-locale`, paired with a human-readable label
- * for this overlay's before/after display: `'search-for-anything'` is one of the SDK's own
- * predefined UI keys (see `Translator.addLocale`'s TSDoc), shown here to demonstrate that
- * `addLocale` can override the SDK's own built-in strings; `'welcome-message'` is a custom,
- * app-defined key the SDK itself gives no built-in meaning to, demonstrating the same store is a
- * general-purpose one. The actual Spanish values live in `web/src/main.js`'s
- * `ADD_LOCALE_RESOURCES` — this list only needs the keys, to render the "before" placeholder and
- * the "after" label. See docs/features/add-locale.md.
- */
-private val ADD_LOCALE_DEMO_KEYS = listOf(
-    "search-for-anything" to "SDK UI key: search-for-anything",
-    "welcome-message" to "Custom app key: welcome-message",
-)
-
-/**
- * FAB-triggered control for `add-locale`: one row per [ADD_LOCALE_DEMO_KEYS] entry showing
- * "(not added yet)" until the "Add Spanish locale" button is pressed, then the real Spanish text —
- * this before/after contrast, not the SDK's own visible UI, is the primary proof that
- * `venue.translator.addLocale('es', ...)` worked, since neither key changes any POI/label name on
- * the map itself (see docs/features/add-locale.md, "Things to know"). Pressing the button calls
- * [WebView.addSpanishLocale], which both adds the locale and immediately reads every key back via
- * `translate` on the JS side in one round trip (`requestId` guards against a stale response, same
- * convention as [CustomDataOverlay]/[RuntimeLocaleOverlay]) — [translations] is populated from that
- * single response, never queried again afterward. The secondary "Switch to Spanish" button below
- * reuses [WebView.setLocale] verbatim (`runtime-locale`'s own call), enabled only once the locale
- * has been added — a bonus that only visibly does anything if one of the SDK's own default UI
- * parts is on screen; it never affects POI/label names either way.
+ * FAB-triggered control for `add-locale`: one row per [ADD_LOCALE_DEMO_KEYS] entry showing "(not
+ * added yet)" until "Add Spanish locale" is pressed, then the real Spanish text — this
+ * before/after contrast is the proof that `venue.translator.addLocale('es', ...)` worked, since
+ * neither key changes any POI/label name on the map (see docs/features/add-locale.md, "Things to
+ * know"). The button calls [WebView.addSpanishLocale], which adds the locale and reads every key
+ * back via `translate` in one round trip. "Switch to Spanish" then calls [WebView.setLocale]
+ * (`runtime-locale`'s call), enabled once the locale is added; its result (or error) is shown.
  */
 @Composable
-fun AddLocaleOverlay(webView: WebView?, addLocaleResolved: AddLocaleResult?) {
-    var translations by remember { mutableStateOf<Map<String, String>?>(null) }
-    var pendingRequestId by remember { mutableStateOf<Int?>(null) }
-    var nextRequestId by remember { mutableStateOf(0) }
-    var errorMessage by remember { mutableStateOf<String?>(null) }
-    var switchedToSpanish by remember { mutableStateOf(false) }
-
-    LaunchedEffect(addLocaleResolved) {
-        val response = addLocaleResolved ?: return@LaunchedEffect
-        if (response.requestId != pendingRequestId) return@LaunchedEffect
-        pendingRequestId = null
-        if (response.translations != null) {
-            translations = response.translations
-            errorMessage = null
-        } else {
-            errorMessage = response.errorMessage
-        }
-    }
-
+fun AddLocaleOverlay(session: AddLocaleSession, webView: WebView?) {
+    val translations = session.translations
     val isAdded = translations != null
 
     Column(
@@ -2152,37 +2146,28 @@ fun AddLocaleOverlay(webView: WebView?, addLocaleResolved: AddLocaleResult?) {
             .fillMaxWidth()
             .padding(16.dp),
     ) {
-        ADD_LOCALE_DEMO_KEYS.forEach { (key, label) ->
-            Text(text = label, style = MaterialTheme.typography.bodySmall)
+        ADD_LOCALE_DEMO_KEYS.forEach { (key, labelRes) ->
+            Text(text = stringResource(labelRes, key), style = MaterialTheme.typography.bodySmall)
             Text(
-                text = translations?.get(key) ?: "(not added yet)",
+                text = translations?.get(key) ?: stringResource(R.string.add_locale_not_added),
                 style = MaterialTheme.typography.bodyMedium,
             )
             Spacer(modifier = Modifier.height(8.dp))
         }
-        Button(
-            onClick = {
-                errorMessage = null
-                val requestId = nextRequestId++
-                pendingRequestId = requestId
-                webView?.addSpanishLocale(requestId)
-            },
-        ) {
-            Text(if (isAdded) "Re-add Spanish locale" else "Add Spanish locale")
+        Button(onClick = { session.addSpanish(webView) }) {
+            Text(stringResource(if (isAdded) R.string.add_locale_readd else R.string.add_locale_add))
         }
-        if (errorMessage != null) {
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(text = errorMessage.orEmpty(), color = MaterialTheme.colorScheme.error)
-        }
+        ErrorText(session.error?.resolve())
         Spacer(modifier = Modifier.height(8.dp))
         OutlinedButton(
-            onClick = {
-                switchedToSpanish = true
-                webView?.setLocale(nextRequestId++, "es")
-            },
-            enabled = isAdded,
+            onClick = { session.switchToSpanish(webView) },
+            enabled = isAdded && !session.isSpanishDisplayed,
         ) {
-            Text(if (switchedToSpanish) "Switched to Spanish" else "Switch to Spanish")
+            Text(
+                stringResource(
+                    if (session.isSpanishDisplayed) R.string.add_locale_switched else R.string.add_locale_switch,
+                ),
+            )
         }
     }
 }
@@ -2195,15 +2180,14 @@ fun AddLocaleOverlay(webView: WebView?, addLocaleResolved: AddLocaleResult?) {
 @Stable
 class GeofencingSession(val tracking: TrackedPositionSession = TrackedPositionSession()) {
     var zoneId by mutableStateOf(DemoMap.GEOFENCE_ZONE_ID)
-    var zoneErrorMessage by mutableStateOf<String?>(null)
+    var zoneError by mutableStateOf<UiText?>(null)
         private set
     private var pendingZoneRequestId: Int? = null
-    private var nextZoneRequestId = 0
 
     internal fun onRunningChanged(webView: WebView?, running: Boolean) {
         if (running) {
-            zoneErrorMessage = null
-            val requestId = nextZoneRequestId++
+            zoneError = null
+            val requestId = nextBridgeRequestId()
             pendingZoneRequestId = requestId
             webView?.resolveZone(requestId, zoneId.trim())
         } else {
@@ -2216,9 +2200,9 @@ class GeofencingSession(val tracking: TrackedPositionSession = TrackedPositionSe
     internal fun onZoneResolved(result: ZoneResolution) {
         if (result.requestId != pendingZoneRequestId) return
         pendingZoneRequestId = null
-        zoneErrorMessage = when (result.status) {
-            "not-found" -> "Zone POI not found"
-            "no-surface" -> "Zone POI has no surface geometry"
+        zoneError = when (result.status) {
+            "not-found" -> UiText(R.string.zone_not_found)
+            "no-surface" -> UiText(R.string.zone_no_surface)
             else -> null
         }
     }
@@ -2276,20 +2260,17 @@ fun GeofencingOverlay(
             OutlinedTextField(
                 value = session.zoneId,
                 onValueChange = { session.zoneId = it },
-                label = { Text("Zone POI ID") },
+                label = { Text(stringResource(R.string.field_zone_poi_id)) },
                 singleLine = true,
                 enabled = !isRunning,
                 modifier = Modifier.fillMaxWidth(),
             )
-            val zoneErrorMessage = session.zoneErrorMessage
+            val zoneError = session.zoneError
             when {
-                zoneErrorMessage != null -> {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(text = zoneErrorMessage, color = MaterialTheme.colorScheme.error)
-                }
+                zoneError != null -> ErrorText(zoneError.resolve())
                 isRunning -> {
                     Spacer(modifier = Modifier.height(8.dp))
-                    Text(text = if (isInsideZone) "Inside zone" else "Outside zone")
+                    Text(stringResource(if (isInsideZone) R.string.zone_inside else R.string.zone_outside))
                 }
             }
         },
@@ -2306,9 +2287,8 @@ fun GeofencingOverlay(
  * kdoc. The two outcomes both surface through [FeatureMapScreen]'s own existing loading/error UI,
  * not a message rendered here: the default URL reloading successfully proves the parameter is
  * genuinely wired through (it's the same value the SDK would use anyway), and a garbage URL
- * reloading into the existing "Impossible de charger la carte VisioOne" error banner — with the
- * SDK's own `VenueNotFoundError` message — is the same "error state as a valid demo outcome"
- * idiom already used by `custom-data`/`dynamic-poi-crud`/`goto-poi`. See
+ * reloading into the screen's load-error message — with the SDK's own `VenueNotFoundError`
+ * message — is a valid demo outcome too. See
  * docs/features/custom-base-url.md.
  */
 @Composable
@@ -2319,7 +2299,7 @@ fun CustomBaseUrlOverlay(currentBaseUrl: String, onReload: (String) -> Unit) {
         OutlinedTextField(
             value = baseUrl,
             onValueChange = { baseUrl = it },
-            label = { Text("Base URL") },
+            label = { Text(stringResource(R.string.field_base_url)) },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
@@ -2328,16 +2308,10 @@ fun CustomBaseUrlOverlay(currentBaseUrl: String, onReload: (String) -> Unit) {
             onClick = { onReload(baseUrl.trim()) },
             enabled = baseUrl.isNotBlank(),
         ) {
-            Text("Reload")
+            Text(stringResource(R.string.action_reload))
         }
     }
 }
-
-/**
- * Prefilled anchor POI for `3d-icon-marker`: a POI of the shared demo map that has a label to copy
- * a position from ("Restaurant", B4 ground floor). See docs/features/3d-icon-marker.md.
- */
-private const val ICON_MARKER_DEFAULT_ANCHOR_ID = DemoMap.ANCHOR_POI_ID
 
 /**
  * The single image id this demo places under on the JS side — only one icon at a time, a
@@ -2345,11 +2319,11 @@ private const val ICON_MARKER_DEFAULT_ANCHOR_ID = DemoMap.ANCHOR_POI_ID
  */
 private const val ICON_MARKER_IMAGE_ID = "demo-icon"
 
-/** The SDK's three `OrientationType` values, paired with a human-readable label. */
+/** The SDK's three `OrientationType` values, paired with a localized label. */
 private val ICON_MARKER_ORIENTATIONS = listOf(
-    "fixed" to "Fixed",
-    "flat" to "Flat",
-    "facing" to "Facing camera",
+    "fixed" to R.string.orientation_fixed,
+    "flat" to R.string.orientation_flat,
+    "facing" to R.string.orientation_facing,
 )
 
 /**
@@ -2384,21 +2358,22 @@ private fun WebView.removeIconImage() {
 }
 
 /**
- * Result of a [WebView.placeIconImage] call, carried by `AndroidBridge.onIconImagePlaced`.
- * [status] is one of `"placed"` ([poiId] then non-null), `"anchor-not-found"`,
+ * Result of a [WebView.placeIconImage] or [WebView.placeTextLabel] call, carried by
+ * `AndroidBridge.onIconImagePlaced` / `AndroidBridge.onTextLabelPlaced`. [status] is one of
+ * `"placed"` ([poiId] then non-null), `"text-required"` (text label only), `"anchor-not-found"`,
  * `"anchor-has-no-position"`, or `"error"` ([message] carrying its text).
  */
-data class IconImagePlacementResult(
+data class PlacementResult(
     val requestId: Int,
     val status: String,
     val poiId: String? = null,
     val message: String? = null,
 )
 
-/** Parses the JSON object argument of `AndroidBridge.onIconImagePlaced`, e.g. `{"status":"placed","poiId":"…"}`. */
-internal fun parseIconImagePlacementPayload(requestId: Int, json: String): IconImagePlacementResult {
+/** Parses the JSON object argument of `onIconImagePlaced`/`onTextLabelPlaced`, e.g. `{"status":"placed","poiId":"…"}`. */
+internal fun parsePlacementPayload(requestId: Int, json: String): PlacementResult {
     val root = JSONObject(json)
-    return IconImagePlacementResult(
+    return PlacementResult(
         requestId = requestId,
         status = root.getString("status"),
         poiId = if (root.has("poiId")) root.getString("poiId") else null,
@@ -2406,132 +2381,136 @@ internal fun parseIconImagePlacementPayload(requestId: Int, json: String): IconI
     )
 }
 
+/** The error to show for a failed [PlacementResult], or null when it was placed. */
+private fun PlacementResult.errorUiText(@StringRes fallbackRes: Int): UiText? = when (status) {
+    "placed" -> null
+    "text-required" -> UiText(R.string.text_required)
+    "anchor-not-found" -> UiText(R.string.poi_not_found)
+    "anchor-has-no-position" -> UiText(R.string.poi_has_no_position)
+    else -> message?.let { UiText(R.string.raw_message, listOf(it)) } ?: UiText(fallbackRes)
+}
+
 /**
- * FAB-triggered control for `3d-icon-marker`: an "Anchor POI ID" field (prefilled with
- * [ICON_MARKER_DEFAULT_ANCHOR_ID]), one chip per [ICON_MARKER_ORIENTATIONS] entry (default
- * "Facing camera"), Place icon/Remove icon buttons and a status line. Place calls
- * [WebView.placeIconImage] and waits for `AndroidBridge.onIconImagePlaced` (`requestId` guards
- * against a stale response, same as [DynamicPoiCrudOverlay]); "POI not found"/"no position"
- * outcomes surface as normal states; on success the camera moves to the anchor POI via
- * [WebView.goToPlace] (goto-poi's own call — its surface highlight is reverted on Remove via
- * [WebView.clearPlace]). Changing the orientation while an icon is placed calls
- * [WebView.updateIconImageOrientation] live. See docs/features/3d-icon-marker.md.
+ * Screen-level state of `3d-icon-marker`: the fields, and the POI the icon is placed on, so after a
+ * close/reopen "Remove icon" and the live orientation chips still act on the icon on the map.
+ * [onPlaced] is fed every `onIconImagePlaced` response at screen level; on success it moves the
+ * camera to the anchor POI via [WebView.goToPlace] (goto-poi's call — from the default whole-venue
+ * view the indoor floor, and so the icon, isn't shown).
+ */
+@Stable
+class IconMarkerSession {
+    var anchorId by mutableStateOf(DemoMap.ANCHOR_POI_ID)
+    var orientation by mutableStateOf("facing")
+    var placedOnPoiId by mutableStateOf<String?>(null)
+        private set
+    var error by mutableStateOf<UiText?>(null)
+        private set
+    private var pendingRequestId: Int? = null
+
+    fun place(webView: WebView?) {
+        error = null
+        val requestId = nextBridgeRequestId()
+        pendingRequestId = requestId
+        webView?.placeIconImage(requestId, anchorId.trim(), orientation)
+    }
+
+    fun selectOrientation(webView: WebView?, value: String) {
+        orientation = value
+        if (placedOnPoiId != null) webView?.updateIconImageOrientation(value)
+    }
+
+    fun remove(webView: WebView?) {
+        webView?.removeIconImage()
+        webView?.clearPlace()
+        placedOnPoiId = null
+        error = null
+    }
+
+    internal fun onPlaced(webView: WebView?, response: PlacementResult) {
+        if (response.requestId != pendingRequestId) return
+        pendingRequestId = null
+        error = response.errorUiText(R.string.icon_place_failed)
+        if (response.status == "placed") {
+            placedOnPoiId = response.poiId
+            response.poiId?.let { webView?.goToPlace(it) }
+        }
+    }
+}
+
+/**
+ * FAB-triggered control for `3d-icon-marker`: an "Anchor POI ID" field, one chip per
+ * [ICON_MARKER_ORIENTATIONS] entry (default "Facing camera"), Place icon/Remove icon buttons and a
+ * status line, bound to the screen-level [IconMarkerSession]. Place calls [WebView.placeIconImage];
+ * "POI not found"/"no position" outcomes surface as normal states. Changing the orientation while
+ * an icon is placed calls [WebView.updateIconImageOrientation] live. See
+ * docs/features/3d-icon-marker.md.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun IconMarker3dOverlay(webView: WebView?, iconImagePlaced: IconImagePlacementResult?) {
-    var anchorId by remember { mutableStateOf(ICON_MARKER_DEFAULT_ANCHOR_ID) }
-    var orientation by remember { mutableStateOf("facing") }
-    var placedOnPoiId by remember { mutableStateOf<String?>(null) }
-    var pendingRequestId by remember { mutableStateOf<Int?>(null) }
-    var nextRequestId by remember { mutableStateOf(0) }
-    var errorMessage by remember { mutableStateOf<String?>(null) }
-
-    LaunchedEffect(iconImagePlaced) {
-        val response = iconImagePlaced ?: return@LaunchedEffect
-        if (response.requestId != pendingRequestId) return@LaunchedEffect
-        pendingRequestId = null
-        when (response.status) {
-            "placed" -> {
-                errorMessage = null
-                placedOnPoiId = response.poiId
-                // Reuses goto-poi's call: from the default whole-venue view the indoor floor (and
-                // so the icon) isn't shown, so the camera has to move to the anchor POI.
-                response.poiId?.let { webView?.goToPlace(it) }
-            }
-            "anchor-not-found" -> errorMessage = "POI not found"
-            "anchor-has-no-position" -> errorMessage = "This POI has no position"
-            else -> errorMessage = response.message ?: "Could not place the icon"
-        }
-    }
-
+fun IconMarker3dOverlay(session: IconMarkerSession, webView: WebView?) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(16.dp),
     ) {
         OutlinedTextField(
-            value = anchorId,
-            onValueChange = { anchorId = it },
-            label = { Text("Anchor POI ID") },
+            value = session.anchorId,
+            onValueChange = { session.anchorId = it },
+            label = { Text(stringResource(R.string.field_anchor_poi_id)) },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
         Spacer(modifier = Modifier.height(12.dp))
-        Text(text = "Orientation", style = MaterialTheme.typography.labelLarge)
+        Text(text = stringResource(R.string.orientation_label), style = MaterialTheme.typography.labelLarge)
         FlowRow(modifier = Modifier.fillMaxWidth()) {
-            ICON_MARKER_ORIENTATIONS.forEach { (value, label) ->
+            ICON_MARKER_ORIENTATIONS.forEach { (value, labelRes) ->
                 FilterChip(
-                    selected = value == orientation,
-                    onClick = {
-                        orientation = value
-                        if (placedOnPoiId != null) webView?.updateIconImageOrientation(value)
-                    },
-                    label = { Text(label) },
+                    selected = value == session.orientation,
+                    onClick = { session.selectOrientation(webView, value) },
+                    label = { Text(stringResource(labelRes)) },
                     modifier = Modifier.padding(end = 8.dp),
                 )
             }
         }
         Spacer(modifier = Modifier.height(8.dp))
         Row(modifier = Modifier.fillMaxWidth()) {
-            Button(
-                onClick = {
-                    errorMessage = null
-                    val requestId = nextRequestId++
-                    pendingRequestId = requestId
-                    webView?.placeIconImage(requestId, anchorId.trim(), orientation)
-                },
-                enabled = anchorId.isNotBlank(),
-            ) {
-                Text("Place icon")
+            Button(onClick = { session.place(webView) }, enabled = session.anchorId.isNotBlank()) {
+                Text(stringResource(R.string.icon_place))
             }
             Spacer(modifier = Modifier.width(8.dp))
-            OutlinedButton(
-                onClick = {
-                    webView?.removeIconImage()
-                    webView?.clearPlace()
-                    placedOnPoiId = null
-                    errorMessage = null
-                },
-                enabled = placedOnPoiId != null,
-            ) {
-                Text("Remove icon")
+            OutlinedButton(onClick = { session.remove(webView) }, enabled = session.placedOnPoiId != null) {
+                Text(stringResource(R.string.icon_remove))
             }
         }
         Spacer(modifier = Modifier.height(8.dp))
-        if (errorMessage != null) {
-            Text(text = errorMessage.orEmpty(), color = MaterialTheme.colorScheme.error)
+        val error = session.error
+        if (error != null) {
+            Text(text = error.resolve(), color = MaterialTheme.colorScheme.error)
         } else {
             Text(
-                text = placedOnPoiId?.let { "Icon placed on $it" } ?: "No icon placed",
+                text = session.placedOnPoiId?.let { stringResource(R.string.icon_placed_on, it) }
+                    ?: stringResource(R.string.icon_none),
                 style = MaterialTheme.typography.bodyMedium,
             )
         }
     }
 }
 
-/**
- * Prefilled anchor POI for `custom-text-label` — same "Restaurant" POI (B4 ground floor) as
- * [ICON_MARKER_DEFAULT_ANCHOR_ID], which has a label to copy a position from. See
- * docs/features/custom-text-label.md.
- */
-private const val TEXT_LABEL_DEFAULT_ANCHOR_ID = ICON_MARKER_DEFAULT_ANCHOR_ID
-
 /** Font colors offered for the label (hex — the SDK only accepts hex / `rgb()` / `hsl()`). */
 private val TEXT_LABEL_COLORS = listOf(
-    "#E53935" to "Red",
-    "#43A047" to "Green",
-    "#1E88E5" to "Blue",
-    "#212121" to "Dark",
+    "#E53935" to R.string.color_red,
+    "#43A047" to R.string.color_green,
+    "#1E88E5" to R.string.color_blue,
+    "#212121" to R.string.color_dark,
 )
 
 /** A label size preset: [width]×[height] in meters, always sent together to the SDK. */
-private data class TextLabelSize(val label: String, val width: Int, val height: Int)
+private data class TextLabelSize(@StringRes val labelRes: Int, val width: Int, val height: Int)
 
 private val TEXT_LABEL_SIZES = listOf(
-    TextLabelSize("Small", width = 10, height = 2),
-    TextLabelSize("Medium", width = 16, height = 3),
-    TextLabelSize("Large", width = 22, height = 4),
+    TextLabelSize(R.string.size_small, width = 10, height = 2),
+    TextLabelSize(R.string.size_medium, width = 16, height = 3),
+    TextLabelSize(R.string.size_large, width = 22, height = 4),
 )
 
 /** Rotations offered for the label, in degrees (create-only in the SDK, see the doc). */
@@ -2590,148 +2569,147 @@ private fun WebView.removeTextLabel() {
 }
 
 /**
- * Result of a [WebView.placeTextLabel] call, carried by `AndroidBridge.onTextLabelPlaced`.
- * [status] is one of `"placed"` ([poiId] then non-null), `"text-required"`, `"anchor-not-found"`,
- * `"anchor-has-no-position"`, or `"error"` ([message] carrying its text).
+ * Screen-level state of `custom-text-label`: the fields and style, and the POI the label is placed
+ * on, so after a close/reopen Update text/Remove label and the live style controls still act on
+ * the label on the map. [onPlaced] is fed every `onTextLabelPlaced` response at screen level; on
+ * success it moves the camera to the anchor POI via [WebView.goToPlace] (a label only renders
+ * while its POI's floor is displayed). The JS side validates text, anchor and position before
+ * touching the label already placed, so a failed place leaves it on the map.
  */
-data class TextLabelPlacementResult(
-    val requestId: Int,
-    val status: String,
-    val poiId: String? = null,
-    val message: String? = null,
-)
+@Stable
+class TextLabelSession(initialText: String) {
+    var anchorId by mutableStateOf(DemoMap.ANCHOR_POI_ID)
+    var text by mutableStateOf(initialText)
+    var color by mutableStateOf(TEXT_LABEL_COLORS.first().first)
+        private set
+    var sizeIndex by mutableIntStateOf(1)
+        private set
+    var rotation by mutableIntStateOf(TEXT_LABEL_ROTATIONS.first())
+        private set
+    var placedOnPoiId by mutableStateOf<String?>(null)
+        private set
+    var error by mutableStateOf<UiText?>(null)
+        private set
+    var status by mutableStateOf<UiText?>(null)
+        private set
+    private var pendingRequestId: Int? = null
 
-/** Parses the JSON object argument of `AndroidBridge.onTextLabelPlaced`, e.g. `{"status":"placed","poiId":"…"}`. */
-internal fun parseTextLabelPlacementPayload(requestId: Int, json: String): TextLabelPlacementResult {
-    val root = JSONObject(json)
-    return TextLabelPlacementResult(
-        requestId = requestId,
-        status = root.getString("status"),
-        poiId = if (root.has("poiId")) root.getString("poiId") else null,
-        message = if (root.has("message")) root.getString("message") else null,
-    )
+    fun place(webView: WebView?) {
+        status = null
+        error = null
+        val requestId = nextBridgeRequestId()
+        pendingRequestId = requestId
+        webView?.placeTextLabel(requestId, anchorId.trim(), text.trim(), color, TEXT_LABEL_SIZES[sizeIndex], rotation)
+    }
+
+    fun updateText(webView: WebView?) {
+        error = null
+        status = UiText(R.string.text_updated)
+        webView?.updateTextLabel(JSONObject().put("text", text.trim()))
+    }
+
+    fun selectColor(webView: WebView?, hex: String) {
+        color = hex
+        if (placedOnPoiId != null) webView?.updateTextLabel(JSONObject().put("color", hex))
+    }
+
+    fun selectSize(webView: WebView?, index: Int) {
+        sizeIndex = index
+        val size = TEXT_LABEL_SIZES[index]
+        if (placedOnPoiId != null) {
+            webView?.updateTextLabel(JSONObject().put("width", size.width).put("height", size.height))
+        }
+    }
+
+    fun selectRotation(webView: WebView?, degrees: Int) {
+        rotation = degrees
+        if (placedOnPoiId != null) webView?.setTextLabelRotation(degrees)
+    }
+
+    fun remove(webView: WebView?) {
+        webView?.removeTextLabel()
+        webView?.clearPlace()
+        placedOnPoiId = null
+        error = null
+        status = UiText(R.string.label_removed)
+    }
+
+    internal fun onPlaced(webView: WebView?, response: PlacementResult) {
+        if (response.requestId != pendingRequestId) return
+        pendingRequestId = null
+        error = response.errorUiText(R.string.label_place_failed)
+        if (response.status == "placed") {
+            placedOnPoiId = response.poiId
+            status = null
+            response.poiId?.let { webView?.goToPlace(it) }
+        }
+    }
 }
 
 /**
  * FAB-triggered control for `custom-text-label`: "Anchor POI ID" and "Text" fields, one chip per
  * [TEXT_LABEL_COLORS] entry, segmented [TEXT_LABEL_SIZES]/[TEXT_LABEL_ROTATIONS] controls, Place
- * label/Update text/Remove label buttons and a status line. Place calls [WebView.placeTextLabel]
- * and waits for `AndroidBridge.onTextLabelPlaced` (`requestId` guards against a stale response,
- * same as [IconMarker3dOverlay]); on success the camera moves to the anchor POI via
- * [WebView.goToPlace] (goto-poi's own call, its highlight reverted on Remove via
- * [WebView.clearPlace]). While a label is placed, color/size changes apply live via
- * [WebView.updateTextLabel] (width and height always together) and a rotation change recreates it
- * via [WebView.setTextLabelRotation]. See docs/features/custom-text-label.md.
+ * label/Update text/Remove label buttons and a status line, bound to the screen-level
+ * [TextLabelSession]. Place calls [WebView.placeTextLabel]. While a label is placed, color/size
+ * changes apply live via [WebView.updateTextLabel] (width and height always together) and a
+ * rotation change recreates it via [WebView.setTextLabelRotation]. Text is validated on the JS
+ * side only (`"text-required"`). See docs/features/custom-text-label.md.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun CustomTextLabelOverlay(webView: WebView?, textLabelPlaced: TextLabelPlacementResult?) {
-    var anchorId by remember { mutableStateOf(TEXT_LABEL_DEFAULT_ANCHOR_ID) }
-    val defaultText = stringResource(R.string.custom_text_label_default_text)
-    var text by remember { mutableStateOf(defaultText) }
-    var color by remember { mutableStateOf(TEXT_LABEL_COLORS.first().first) }
-    var size by remember { mutableStateOf(TEXT_LABEL_SIZES[1]) }
-    var rotation by remember { mutableIntStateOf(TEXT_LABEL_ROTATIONS.first()) }
-    var placedOnPoiId by remember { mutableStateOf<String?>(null) }
-    var pendingRequestId by remember { mutableStateOf<Int?>(null) }
-    var nextRequestId by remember { mutableIntStateOf(0) }
-    var errorMessage by remember { mutableStateOf<String?>(null) }
-    var statusMessage by remember { mutableStateOf<String?>(null) }
-
-    LaunchedEffect(textLabelPlaced) {
-        val response = textLabelPlaced ?: return@LaunchedEffect
-        if (response.requestId != pendingRequestId) return@LaunchedEffect
-        pendingRequestId = null
-        // placeTextLabel validates everything before touching the previous label, so a failed
-        // place leaves it on the map: only a "placed" result changes placedOnPoiId.
-        when (response.status) {
-            "placed" -> {
-                placedOnPoiId = response.poiId
-                errorMessage = null
-                statusMessage = "Label placed on ${response.poiId}"
-                // Reuses goto-poi's call: a label only renders while its POI's floor is displayed.
-                response.poiId?.let { webView?.goToPlace(it) }
-            }
-            "text-required" -> errorMessage = "Text is required"
-            "anchor-not-found" -> errorMessage = "POI not found"
-            "anchor-has-no-position" -> errorMessage = "This POI has no position"
-            else -> errorMessage = response.message ?: "Could not place the label"
-        }
-    }
-
+fun CustomTextLabelOverlay(session: TextLabelSession, webView: WebView?) {
+    val isPlaced = session.placedOnPoiId != null
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(16.dp),
     ) {
         OutlinedTextField(
-            value = anchorId,
-            onValueChange = { anchorId = it },
-            label = { Text("Anchor POI ID") },
+            value = session.anchorId,
+            onValueChange = { session.anchorId = it },
+            label = { Text(stringResource(R.string.field_anchor_poi_id)) },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
         Spacer(modifier = Modifier.height(8.dp))
         OutlinedTextField(
-            value = text,
-            onValueChange = { text = it },
-            label = { Text("Text") },
+            value = session.text,
+            onValueChange = { session.text = it },
+            label = { Text(stringResource(R.string.field_text)) },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
         Spacer(modifier = Modifier.height(12.dp))
-        Text(text = "Color", style = MaterialTheme.typography.labelLarge)
+        Text(text = stringResource(R.string.color_label), style = MaterialTheme.typography.labelLarge)
         FlowRow(modifier = Modifier.fillMaxWidth()) {
-            TEXT_LABEL_COLORS.forEach { (hex, name) ->
-                FilterChip(
-                    selected = hex == color,
-                    onClick = {
-                        color = hex
-                        if (placedOnPoiId != null) webView?.updateTextLabel(JSONObject().put("color", hex))
-                    },
-                    label = { Text(name) },
-                    leadingIcon = {
-                        Box(
-                            modifier = Modifier
-                                .size(14.dp)
-                                .clip(CircleShape)
-                                .background(Color(hex.toColorInt())),
-                        )
-                    },
-                    modifier = Modifier.padding(end = 8.dp),
+            TEXT_LABEL_COLORS.forEach { (hex, nameRes) ->
+                ColorChip(
+                    hex = hex,
+                    name = stringResource(nameRes),
+                    selected = hex == session.color,
+                    onClick = { session.selectColor(webView, hex) },
                 )
             }
         }
         Spacer(modifier = Modifier.height(8.dp))
-        Text(text = "Size", style = MaterialTheme.typography.labelLarge)
+        Text(text = stringResource(R.string.size_label), style = MaterialTheme.typography.labelLarge)
         SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
             TEXT_LABEL_SIZES.forEachIndexed { index, option ->
                 SegmentedButton(
-                    selected = option == size,
-                    onClick = {
-                        size = option
-                        if (placedOnPoiId != null) {
-                            webView?.updateTextLabel(
-                                JSONObject().put("width", option.width).put("height", option.height),
-                            )
-                        }
-                    },
+                    selected = index == session.sizeIndex,
+                    onClick = { session.selectSize(webView, index) },
                     shape = SegmentedButtonDefaults.itemShape(index = index, count = TEXT_LABEL_SIZES.size),
                 ) {
-                    Text(option.label)
+                    Text(stringResource(option.labelRes))
                 }
             }
         }
         Spacer(modifier = Modifier.height(8.dp))
-        Text(text = "Rotation", style = MaterialTheme.typography.labelLarge)
+        Text(text = stringResource(R.string.rotation_label), style = MaterialTheme.typography.labelLarge)
         SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
             TEXT_LABEL_ROTATIONS.forEachIndexed { index, degrees ->
                 SegmentedButton(
-                    selected = degrees == rotation,
-                    onClick = {
-                        rotation = degrees
-                        if (placedOnPoiId != null) webView?.setTextLabelRotation(degrees)
-                    },
+                    selected = degrees == session.rotation,
+                    onClick = { session.selectRotation(webView, degrees) },
                     shape = SegmentedButtonDefaults.itemShape(index = index, count = TEXT_LABEL_ROTATIONS.size),
                 ) {
                     Text("$degrees°")
@@ -2741,69 +2719,37 @@ fun CustomTextLabelOverlay(webView: WebView?, textLabelPlaced: TextLabelPlacemen
         Spacer(modifier = Modifier.height(12.dp))
         FlowRow(modifier = Modifier.fillMaxWidth()) {
             Button(
-                onClick = {
-                    statusMessage = null
-                    if (text.isBlank()) {
-                        // Mirrors the SDK's own "Cannot create Label, text is required"; any label
-                        // already placed stays on the map, same as a JS-side validation failure.
-                        errorMessage = "Text is required"
-                        return@Button
-                    }
-                    errorMessage = null
-                    val requestId = nextRequestId++
-                    pendingRequestId = requestId
-                    webView?.placeTextLabel(requestId, anchorId.trim(), text.trim(), color, size, rotation)
-                },
-                enabled = anchorId.isNotBlank(),
+                onClick = { session.place(webView) },
+                enabled = session.anchorId.isNotBlank(),
                 modifier = Modifier.padding(end = 8.dp),
             ) {
-                Text("Place label")
+                Text(stringResource(R.string.label_place))
             }
             OutlinedButton(
-                onClick = {
-                    if (text.isBlank()) {
-                        errorMessage = "Text is required"
-                        return@OutlinedButton
-                    }
-                    errorMessage = null
-                    statusMessage = "Text updated"
-                    webView?.updateTextLabel(JSONObject().put("text", text.trim()))
-                },
-                enabled = placedOnPoiId != null,
+                onClick = { session.updateText(webView) },
+                enabled = isPlaced && session.text.isNotBlank(),
                 modifier = Modifier.padding(end = 8.dp),
             ) {
-                Text("Update text")
+                Text(stringResource(R.string.action_update_text))
             }
-            OutlinedButton(
-                onClick = {
-                    webView?.removeTextLabel()
-                    webView?.clearPlace()
-                    placedOnPoiId = null
-                    errorMessage = null
-                    statusMessage = "Label removed"
-                },
-                enabled = placedOnPoiId != null,
-            ) {
-                Text("Remove label")
+            OutlinedButton(onClick = { session.remove(webView) }, enabled = isPlaced) {
+                Text(stringResource(R.string.label_remove))
             }
         }
         Spacer(modifier = Modifier.height(8.dp))
-        if (errorMessage != null) {
-            Text(text = errorMessage.orEmpty(), color = MaterialTheme.colorScheme.error)
+        val error = session.error
+        if (error != null) {
+            Text(text = error.resolve(), color = MaterialTheme.colorScheme.error)
         } else {
             Text(
-                text = statusMessage ?: if (placedOnPoiId != null) "Label placed on $placedOnPoiId" else "No label placed",
+                text = session.status?.resolve()
+                    ?: session.placedOnPoiId?.let { stringResource(R.string.label_placed_on, it) }
+                    ?: stringResource(R.string.label_none),
                 style = MaterialTheme.typography.bodyMedium,
             )
         }
     }
 }
-
-/**
- * Prefilled anchor POI for `html-overlay-marker` — same "Restaurant" POI (B4 ground floor) as
- * [TEXT_LABEL_DEFAULT_ANCHOR_ID]. See docs/features/html-overlay-marker.md.
- */
-private const val HTML_MARKER_DEFAULT_ANCHOR_ID = TEXT_LABEL_DEFAULT_ANCHOR_ID
 
 /**
  * Pins the demo HTML badge on [anchorId] by calling `window.MapBridge.placeHtmlMarker` in the
@@ -2870,18 +2816,25 @@ internal fun parseHtmlMarkerStatePayload(json: String): HtmlMarkerState {
 }
 
 /**
+ * Screen-level values of the `html-overlay-marker` fields, kept across a close/reopen. The badge's
+ * own state lives in the web page and comes back as [HtmlMarkerState].
+ */
+@Stable
+class HtmlMarkerFieldsSession(initialText: String) {
+    var anchorId by mutableStateOf(DemoMap.ANCHOR_POI_ID)
+    var text by mutableStateOf(initialText)
+}
+
+/**
  * FAB-triggered control for `html-overlay-marker`: "Anchor POI ID" and "Badge text" fields, Place
  * badge/Update text/Hide-Show badge/Remove badge buttons and a status line. Everything except the
  * two fields is rendered from [htmlMarkerState] — the JS side is the source of truth (validation
- * included), and this sheet is disposed whenever it's closed, which it has to be to tap the badge
- * on the map. The badge's taps reach native as a `"tapped"` state with the running [HtmlMarkerState.tapCount].
+ * included), and the panel has to be closed to tap the badge on the map. The badge's taps reach
+ * native as a `"tapped"` state with the running [HtmlMarkerState.tapCount].
  * See docs/features/html-overlay-marker.md.
  */
 @Composable
-fun HtmlOverlayMarkerOverlay(webView: WebView?, htmlMarkerState: HtmlMarkerState?) {
-    var anchorId by remember { mutableStateOf(HTML_MARKER_DEFAULT_ANCHOR_ID) }
-    val defaultText = stringResource(R.string.html_marker_default_text)
-    var text by remember { mutableStateOf(defaultText) }
+fun HtmlOverlayMarkerOverlay(fields: HtmlMarkerFieldsSession, webView: WebView?, htmlMarkerState: HtmlMarkerState?) {
     val placedOnPoiId = htmlMarkerState?.placedOnPoiId
     val isVisible = htmlMarkerState?.isVisible ?: true
 
@@ -2891,91 +2844,91 @@ fun HtmlOverlayMarkerOverlay(webView: WebView?, htmlMarkerState: HtmlMarkerState
             .padding(16.dp),
     ) {
         OutlinedTextField(
-            value = anchorId,
-            onValueChange = { anchorId = it },
-            label = { Text("Anchor POI ID") },
+            value = fields.anchorId,
+            onValueChange = { fields.anchorId = it },
+            label = { Text(stringResource(R.string.field_anchor_poi_id)) },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
         Spacer(modifier = Modifier.height(8.dp))
         OutlinedTextField(
-            value = text,
-            onValueChange = { text = it },
-            label = { Text("Badge text") },
+            value = fields.text,
+            onValueChange = { fields.text = it },
+            label = { Text(stringResource(R.string.field_badge_text)) },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
         Spacer(modifier = Modifier.height(12.dp))
         FlowRow(modifier = Modifier.fillMaxWidth()) {
             Button(
-                onClick = { webView?.placeHtmlMarker(anchorId.trim(), text) },
-                enabled = anchorId.isNotBlank(),
+                onClick = { webView?.placeHtmlMarker(fields.anchorId.trim(), fields.text) },
+                enabled = fields.anchorId.isNotBlank(),
                 modifier = Modifier.padding(end = 8.dp),
             ) {
-                Text("Place badge")
+                Text(stringResource(R.string.badge_place))
             }
             OutlinedButton(
-                onClick = { webView?.updateHtmlMarkerText(text) },
+                onClick = { webView?.updateHtmlMarkerText(fields.text) },
                 enabled = placedOnPoiId != null,
                 modifier = Modifier.padding(end = 8.dp),
             ) {
-                Text("Update text")
+                Text(stringResource(R.string.action_update_text))
             }
             OutlinedButton(
                 onClick = { webView?.setHtmlMarkerVisible(!isVisible) },
                 enabled = placedOnPoiId != null,
                 modifier = Modifier.padding(end = 8.dp),
             ) {
-                Text(if (isVisible) "Hide badge" else "Show badge")
+                Text(stringResource(if (isVisible) R.string.badge_hide else R.string.badge_show))
             }
             OutlinedButton(
                 onClick = { webView?.removeHtmlMarker() },
                 enabled = placedOnPoiId != null,
             ) {
-                Text("Remove badge")
+                Text(stringResource(R.string.badge_remove))
             }
         }
         Spacer(modifier = Modifier.height(8.dp))
         val errorMessage = when (htmlMarkerState?.status) {
-            "text-required" -> "Text is required"
-            "anchor-not-found" -> "POI not found"
-            "anchor-has-no-position" -> "This POI has no position"
-            "error" -> htmlMarkerState.message ?: "Could not place the badge"
+            "text-required" -> stringResource(R.string.text_required)
+            "anchor-not-found" -> stringResource(R.string.poi_not_found)
+            "anchor-has-no-position" -> stringResource(R.string.poi_has_no_position)
+            "error" -> htmlMarkerState.message ?: stringResource(R.string.badge_place_failed)
             else -> null
         }
         if (errorMessage != null) {
             Text(text = errorMessage, color = MaterialTheme.colorScheme.error)
         } else {
             val statusMessage = when (htmlMarkerState?.status) {
-                "placed" -> "Badge placed on $placedOnPoiId"
-                "tapped" -> "Badge tapped (${htmlMarkerState.tapCount})"
-                "text-updated" -> "Text updated"
-                "hidden" -> "Badge hidden"
-                "shown" -> "Badge shown"
-                else -> "No badge placed"
+                "placed" -> stringResource(R.string.badge_placed_on, placedOnPoiId.orEmpty())
+                "tapped" -> stringResource(R.string.badge_tapped, htmlMarkerState.tapCount)
+                "text-updated" -> stringResource(R.string.text_updated)
+                "hidden" -> stringResource(R.string.badge_hidden)
+                "shown" -> stringResource(R.string.badge_shown)
+                else -> stringResource(R.string.badge_none)
             }
             Text(text = statusMessage, style = MaterialTheme.typography.bodyMedium)
         }
     }
 }
 
-/** The SDK's own defaults for `custom-theme` (the theme a view starts with, View.d.ts `@defaultValue`s). */
+/** The SDK's own defaults for `custom-theme` (the theme a view starts with, per the View typings' `@defaultValue`s). */
 private const val THEME_DEFAULT_ACCENT_COLOR = "#0094F0"
 private const val THEME_DEFAULT_TEXT_ACCENT_COLOR = "#FFFFFF"
 
 /** Accent colors offered for `view.accentColor` (hex — the SDK only accepts hex / `rgb(a)` / `hsl`). */
 private val THEME_ACCENT_COLORS = listOf(
-    THEME_DEFAULT_ACCENT_COLOR to "Visioglobe blue",
-    "#E53935" to "Red",
-    "#43A047" to "Green",
-    "#8E24AA" to "Purple",
+    THEME_DEFAULT_ACCENT_COLOR to R.string.color_visioglobe_blue,
+    "#E53935" to R.string.color_red,
+    "#43A047" to R.string.color_green,
+    "#8E24AA" to R.string.color_purple,
 )
 
 /** Text colors offered for `view.textAccentColor`. */
 private val THEME_TEXT_ACCENT_COLORS = listOf(
-    THEME_DEFAULT_TEXT_ACCENT_COLOR to "White",
-    "#FFEB3B" to "Yellow",
-    "#212121" to "Black",
+    THEME_DEFAULT_TEXT_ACCENT_COLOR to R.string.color_white,
+    "#FFEB3B" to R.string.color_yellow,
+    "#212121" to R.string.color_black,
 )
 
 /**
@@ -3039,29 +2992,6 @@ internal fun parseThemeStatePayload(json: String): ThemeState {
 }
 
 /**
- * One color choice chip. The swatch gets an outline in the panel's content color, so the dark
- * (Black) and light (White/Yellow) swatches stay visible on either a dark or a light sheet.
- */
-@Composable
-private fun ThemeColorChip(hex: String, name: String, selected: Boolean, onClick: () -> Unit) {
-    FilterChip(
-        selected = selected,
-        onClick = onClick,
-        label = { Text(name) },
-        leadingIcon = {
-            Box(
-                modifier = Modifier
-                    .size(14.dp)
-                    .clip(CircleShape)
-                    .background(Color(hex.toColorInt()))
-                    .border(1.dp, MaterialTheme.colorScheme.onSurface, CircleShape),
-            )
-        },
-        modifier = Modifier.padding(end = 8.dp),
-    )
-}
-
-/**
  * FAB-triggered control for `custom-theme`: a segmented control built at runtime from
  * `view.themes` (raw SDK ids), accent color and accent text color chips, a Reset button, a hint
  * and a status line. Every change applies immediately. Everything is rendered from [themeState] —
@@ -3078,10 +3008,10 @@ fun CustomThemeOverlay(webView: WebView?, themeState: ThemeState?) {
             .fillMaxWidth()
             .padding(16.dp),
     ) {
-        Text(text = "Theme", style = MaterialTheme.typography.labelLarge)
+        Text(text = stringResource(R.string.theme_label), style = MaterialTheme.typography.labelLarge)
         val themes = themeState?.themes.orEmpty()
         if (themes.isEmpty()) {
-            Text(text = "Loading themes…", style = MaterialTheme.typography.bodyMedium)
+            Text(text = stringResource(R.string.themes_loading), style = MaterialTheme.typography.bodyMedium)
         } else {
             SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
                 themes.forEachIndexed { index, themeName ->
@@ -3096,24 +3026,24 @@ fun CustomThemeOverlay(webView: WebView?, themeState: ThemeState?) {
             }
         }
         Spacer(modifier = Modifier.height(12.dp))
-        Text(text = "Accent color", style = MaterialTheme.typography.labelLarge)
+        Text(text = stringResource(R.string.accent_color_label), style = MaterialTheme.typography.labelLarge)
         FlowRow(modifier = Modifier.fillMaxWidth()) {
-            THEME_ACCENT_COLORS.forEach { (hex, name) ->
-                ThemeColorChip(
+            THEME_ACCENT_COLORS.forEach { (hex, nameRes) ->
+                ColorChip(
                     hex = hex,
-                    name = name,
+                    name = stringResource(nameRes),
                     selected = hex.equals(themeState?.accentColor ?: THEME_DEFAULT_ACCENT_COLOR, ignoreCase = true),
                     onClick = { webView?.setAccentColor(hex) },
                 )
             }
         }
         Spacer(modifier = Modifier.height(8.dp))
-        Text(text = "Accent text color", style = MaterialTheme.typography.labelLarge)
+        Text(text = stringResource(R.string.accent_text_color_label), style = MaterialTheme.typography.labelLarge)
         FlowRow(modifier = Modifier.fillMaxWidth()) {
-            THEME_TEXT_ACCENT_COLORS.forEach { (hex, name) ->
-                ThemeColorChip(
+            THEME_TEXT_ACCENT_COLORS.forEach { (hex, nameRes) ->
+                ColorChip(
                     hex = hex,
-                    name = name,
+                    name = stringResource(nameRes),
                     selected = hex.equals(
                         themeState?.textAccentColor ?: THEME_DEFAULT_TEXT_ACCENT_COLOR,
                         ignoreCase = true,
@@ -3124,13 +3054,16 @@ fun CustomThemeOverlay(webView: WebView?, themeState: ThemeState?) {
         }
         Spacer(modifier = Modifier.height(12.dp))
         OutlinedButton(onClick = { webView?.resetTheme() }) {
-            Text("Reset")
+            Text(stringResource(R.string.action_reset))
         }
         Spacer(modifier = Modifier.height(8.dp))
         Text(text = stringResource(R.string.custom_theme_hint), style = MaterialTheme.typography.bodyMedium)
         if (themeState?.status == "error") {
             Spacer(modifier = Modifier.height(4.dp))
-            Text(text = themeState.message ?: "Could not apply the change", color = MaterialTheme.colorScheme.error)
+            Text(
+                text = themeState.message ?: stringResource(R.string.theme_change_failed),
+                color = MaterialTheme.colorScheme.error,
+            )
         }
     }
 }
@@ -3267,8 +3200,167 @@ fun CameraShowcaseCarouselOverlay(webView: WebView?, carouselState: CarouselStat
         )
         Spacer(modifier = Modifier.height(8.dp))
         Text(
-            text = stringResource(R.string.carousel_hint),
+            text = stringResource(R.string.carousel_hint, (carouselState.resumeAfterMs / 1000).toInt()),
             style = MaterialTheme.typography.bodySmall,
         )
+    }
+}
+
+// --- Screen-level state ---------------------------------------------------------------------
+
+/**
+ * Every piece of per-feature state that must outlive the FAB's bottom sheet, which is disposed on
+ * every close: one instance per feature screen (remembered in `MainActivity`), each session created
+ * lazily on first use, so a screen only ever builds its own. The rule for every screen: after the
+ * panel is closed and reopened, it shows the map's real current state; leaving the screen drops
+ * all of it (and [FeatureScreenHost]'s loops) together with the WebView.
+ */
+@Stable
+class FeatureSessions(private val feature: Feature?, private val resources: Resources) {
+    val occupancy by lazy { OccupancySession(DemoMap.OCCUPANCY_PLACE_ID) }
+    val goToPoi by lazy { PlaceIdSession(DemoMap.GOTO_POI_ID) }
+    val clickableSurface by lazy { PlaceIdSession(DemoMap.CLICKABLE_SURFACE_PLACE_ID) }
+    val itinerary by lazy {
+        when (feature) {
+            Feature.NavigationExcludeModalities ->
+                ItinerarySession(DemoMap.EXCLUDE_MODALITIES_FROM, DemoMap.EXCLUDE_MODALITIES_TO)
+            Feature.AccessibleMode -> ItinerarySession(DemoMap.ACCESSIBLE_FROM, DemoMap.ACCESSIBLE_TO)
+            else -> ItinerarySession(DemoMap.ITINERARY_FROM, DemoMap.ITINERARY_TO)
+        }
+    }
+    val uiPartVisibility by lazy { UiPartVisibilitySession() }
+    val nativeUiReplacement by lazy { NativeUiReplacementSession() }
+    val tracking by lazy {
+        if (feature == Feature.AccuracyCircleStyle) {
+            accuracyCircleStyleSession()
+        } else {
+            TrackedPositionSession(initialOriginId = DemoMap.TRACKING_FROM, initialDestinationId = DemoMap.TRACKING_TO)
+        }
+    }
+    val geofencing by lazy { GeofencingSession(tracking) }
+
+    /** `accuracy-circle-style`'s selection — the SDK has no getter to read it back from. */
+    var positionTrackerStyle by mutableStateOf(PositionTrackerStyle())
+    val customData by lazy { CustomDataSession(DemoMap.CUSTOM_DATA_PLACE_ID) }
+    val categoryHighlight by lazy { CategoryHighlightSession() }
+    val dynamicPoi by lazy { DynamicPoiCrudSession(resources.getString(R.string.dynamic_poi_default_label)) }
+    val runtimeLocale by lazy { RuntimeLocaleSession() }
+    val addLocale by lazy { AddLocaleSession() }
+    val iconMarker by lazy { IconMarkerSession() }
+    val textLabel by lazy { TextLabelSession(resources.getString(R.string.custom_text_label_default_text)) }
+    val htmlMarkerFields by lazy { HtmlMarkerFieldsSession(resources.getString(R.string.html_marker_default_text)) }
+}
+
+/**
+ * Composed for the whole lifetime of a feature screen, outside the bottom sheet (via
+ * `FeatureMapScreen`'s `screenContent`); renders nothing. It runs the screen's loops (tracked
+ * position, geofencing, occupancy — exactly one per screen, whatever the number of panel
+ * open/close cycles) and feeds every bridge response to its session, so a response that arrives
+ * while the panel is closed is not lost.
+ */
+@Composable
+fun FeatureScreenHost(
+    feature: Feature?,
+    sessions: FeatureSessions,
+    webView: WebView?,
+    bridgeState: FeatureBridgeState,
+) {
+    when (feature) {
+        Feature.SimulatedPosition,
+        Feature.CameraLockOnPosition,
+        Feature.AccuracyCircleStyle,
+        -> TrackedPositionSimulationHost(sessions.tracking, webView, bridgeState.positionsResolved)
+        Feature.Geofencing -> GeofencingSimulationHost(
+            sessions.geofencing,
+            webView,
+            bridgeState.positionsResolved,
+            bridgeState.zoneResolved,
+        )
+        Feature.OccupancySimulated -> OccupancySimulationHost(sessions.occupancy, webView)
+        Feature.CustomData -> LaunchedEffect(bridgeState.customDataLoaded) {
+            bridgeState.customDataLoaded?.let(sessions.customData::onLoaded)
+        }
+        Feature.CategoryHighlight -> LaunchedEffect(bridgeState.categoriesLoaded) {
+            bridgeState.categoriesLoaded?.let(sessions.categoryHighlight::onCategoriesLoaded)
+        }
+        Feature.DynamicPoiCrud -> LaunchedEffect(bridgeState.dynamicPoiCreated) {
+            bridgeState.dynamicPoiCreated?.let(sessions.dynamicPoi::onCreated)
+        }
+        Feature.RuntimeLocale -> LaunchedEffect(bridgeState.localeResolved) {
+            bridgeState.localeResolved?.let(sessions.runtimeLocale::onLocaleResolved)
+        }
+        Feature.AddLocale -> {
+            LaunchedEffect(bridgeState.addLocaleResolved) {
+                bridgeState.addLocaleResolved?.let(sessions.addLocale::onAddLocaleResolved)
+            }
+            LaunchedEffect(bridgeState.localeResolved) {
+                bridgeState.localeResolved?.let(sessions.addLocale::onLocaleResolved)
+            }
+        }
+        Feature.IconMarker3d -> LaunchedEffect(bridgeState.iconImagePlaced) {
+            bridgeState.iconImagePlaced?.let { sessions.iconMarker.onPlaced(webView, it) }
+        }
+        Feature.CustomTextLabel -> LaunchedEffect(bridgeState.textLabelPlaced) {
+            bridgeState.textLabelPlaced?.let { sessions.textLabel.onPlaced(webView, it) }
+        }
+        else -> Unit
+    }
+}
+
+/** The FAB's bottom-sheet content of each feature screen, bound to that screen's [sessions]. */
+@Composable
+fun FeatureSheetContent(
+    feature: Feature?,
+    sessions: FeatureSessions,
+    webView: WebView?,
+    bridgeState: FeatureBridgeState,
+) {
+    when (feature) {
+        Feature.ResetView -> ResetViewOverlay(webView)
+        Feature.OccupancySimulated -> OccupancySimulationOverlay(sessions.occupancy)
+        Feature.PoiClick -> PoiClickOverlay(bridgeState.lastPoiClick)
+        Feature.GoToPoi -> GoToPoiOverlay(sessions.goToPoi, webView)
+        Feature.FloorSelector -> FloorSelectorOverlay(webView, bridgeState.floorSelector)
+        Feature.ComputeNavigation ->
+            ComputeNavigationOverlay(sessions.itinerary, webView, bridgeState.navigationError)
+        Feature.UiPartVisibility -> UiPartVisibilityOverlay(sessions.uiPartVisibility, webView)
+        Feature.NativeUiReplacement ->
+            NativeUiReplacementOverlay(sessions.nativeUiReplacement, webView, bridgeState.floorSelector)
+        Feature.SimulatedPosition -> SimulatedPositionOverlay(sessions.tracking, webView)
+        Feature.CameraLockOnPosition ->
+            CameraLockOnPositionOverlay(sessions.tracking, webView, bridgeState.isCameraLocked)
+        Feature.ClickableSurface -> ClickableSurfaceOverlay(sessions.clickableSurface, webView)
+        Feature.CustomData -> CustomDataOverlay(sessions.customData, webView)
+        Feature.CategoryHighlight -> CategoryHighlightOverlay(sessions.categoryHighlight, webView)
+        Feature.DynamicPoiCrud -> DynamicPoiCrudOverlay(sessions.dynamicPoi, webView)
+        Feature.RuntimeLocale -> RuntimeLocaleOverlay(sessions.runtimeLocale, webView)
+        Feature.ExploreMode -> ExploreModeOverlay(webView, bridgeState.currentExploreMode)
+        Feature.AddLocale -> AddLocaleOverlay(sessions.addLocale, webView)
+        Feature.Geofencing ->
+            GeofencingOverlay(sessions.geofencing, webView, bridgeState.isInsideGeofenceZone)
+        Feature.CustomBaseUrl -> CustomBaseUrlOverlay(bridgeState.currentBaseUrl, bridgeState.onReloadWithBaseUrl)
+        Feature.CustomNavigationTrace ->
+            CustomNavigationTraceOverlay(sessions.itinerary, webView, bridgeState.navigationError)
+        Feature.NavigationExcludeModalities ->
+            NavigationExcludeModalitiesOverlay(sessions.itinerary, webView, bridgeState.navigationError)
+        Feature.AccessibleMode -> AccessibleModeOverlay(sessions.itinerary, webView, bridgeState.navigationError)
+        Feature.IconMarker3d -> IconMarker3dOverlay(sessions.iconMarker, webView)
+        Feature.CustomTextLabel -> CustomTextLabelOverlay(sessions.textLabel, webView)
+        Feature.HtmlOverlayMarker ->
+            HtmlOverlayMarkerOverlay(sessions.htmlMarkerFields, webView, bridgeState.htmlMarkerState)
+        Feature.CustomTheme -> CustomThemeOverlay(webView, bridgeState.themeState)
+        Feature.AccuracyCircleStyle -> AccuracyCircleStyleOverlay(
+            sessions.tracking,
+            webView,
+            sessions.positionTrackerStyle,
+            onStyleChange = { sessions.positionTrackerStyle = it },
+        )
+        Feature.CameraProjectionToggle -> CameraProjectionToggleOverlay(
+            bridgeState.cameraProjection,
+            bridgeState.isMapReady,
+            bridgeState.onReloadWithCameraProjection,
+        )
+        Feature.CameraShowcaseCarousel -> CameraShowcaseCarouselOverlay(webView, bridgeState.carouselState)
+        Feature.AuthToken, null -> Unit
     }
 }

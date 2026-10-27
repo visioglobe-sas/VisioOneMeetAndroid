@@ -4,54 +4,20 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalResources
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.visioglobe.visioonemeet.model.DemoMap
 import com.visioglobe.visioonemeet.model.Feature
-import com.visioglobe.visioonemeet.ui.AccessibleModeOverlay
-import com.visioglobe.visioonemeet.ui.AccuracyCircleStyleOverlay
-import com.visioglobe.visioonemeet.ui.AddLocaleOverlay
 import com.visioglobe.visioonemeet.ui.AuthTokenSampleScreen
-import com.visioglobe.visioonemeet.ui.CameraLockOnPositionOverlay
-import com.visioglobe.visioonemeet.ui.CameraProjectionToggleOverlay
-import com.visioglobe.visioonemeet.ui.CameraShowcaseCarouselOverlay
-import com.visioglobe.visioonemeet.ui.CategoryHighlightOverlay
-import com.visioglobe.visioonemeet.ui.ClickableSurfaceOverlay
-import com.visioglobe.visioonemeet.ui.ComputeNavigationOverlay
-import com.visioglobe.visioonemeet.ui.CustomBaseUrlOverlay
-import com.visioglobe.visioonemeet.ui.CustomDataOverlay
-import com.visioglobe.visioonemeet.ui.CustomNavigationTraceOverlay
-import com.visioglobe.visioonemeet.ui.CustomTextLabelOverlay
-import com.visioglobe.visioonemeet.ui.CustomThemeOverlay
-import com.visioglobe.visioonemeet.ui.DynamicPoiCrudOverlay
-import com.visioglobe.visioonemeet.ui.ExploreModeOverlay
 import com.visioglobe.visioonemeet.ui.FeatureMapScreen
 import com.visioglobe.visioonemeet.ui.FeatureMenuScreen
-import com.visioglobe.visioonemeet.ui.FloorSelectorOverlay
-import com.visioglobe.visioonemeet.ui.GeofencingOverlay
-import com.visioglobe.visioonemeet.ui.GeofencingSession
-import com.visioglobe.visioonemeet.ui.GeofencingSimulationHost
-import com.visioglobe.visioonemeet.ui.GoToPoiOverlay
-import com.visioglobe.visioonemeet.ui.HtmlOverlayMarkerOverlay
-import com.visioglobe.visioonemeet.ui.IconMarker3dOverlay
-import com.visioglobe.visioonemeet.ui.NativeUiReplacementOverlay
-import com.visioglobe.visioonemeet.ui.NavigationExcludeModalitiesOverlay
-import com.visioglobe.visioonemeet.ui.OccupancySimulationOverlay
-import com.visioglobe.visioonemeet.ui.PositionTrackerStyle
-import com.visioglobe.visioonemeet.ui.PoiClickOverlay
-import com.visioglobe.visioonemeet.ui.ResetViewOverlay
-import com.visioglobe.visioonemeet.ui.RuntimeLocaleOverlay
-import com.visioglobe.visioonemeet.ui.SimulatedPositionOverlay
-import com.visioglobe.visioonemeet.ui.TrackedPositionSession
-import com.visioglobe.visioonemeet.ui.TrackedPositionSimulationHost
-import com.visioglobe.visioonemeet.ui.UiPartVisibilityOverlay
-import com.visioglobe.visioonemeet.ui.accuracyCircleStyleSession
+import com.visioglobe.visioonemeet.ui.FeatureScreenHost
+import com.visioglobe.visioonemeet.ui.FeatureSessions
+import com.visioglobe.visioonemeet.ui.FeatureSheetContent
 import com.visioglobe.visioonemeet.ui.setUiPartVisible
 import com.visioglobe.visioonemeet.ui.theme.VisioOneMeetTheme
 
@@ -79,25 +45,10 @@ class MainActivity : ComponentActivity() {
                             )
                             return@composable
                         }
-                        // accuracy-circle-style: hoisted here (not inside the bottom sheet, which is
-                        // disposed on every close) so the selection survives a close/reopen — the
-                        // SDK has no getter for it. See docs/features/accuracy-circle-style.md.
-                        var positionTrackerStyle by remember { mutableStateOf(PositionTrackerStyle()) }
-                        // The four tracked-position screens: the simulation state and its loop are
-                        // screen-level too (not inside the bottom sheet), so the simulation keeps
-                        // running while the sheet is closed and stops when this screen is left.
-                        // See docs/features/simulated-position.md.
-                        val trackedPositionSession = remember {
-                            if (feature == Feature.AccuracyCircleStyle) {
-                                accuracyCircleStyleSession()
-                            } else {
-                                TrackedPositionSession(
-                                    initialOriginId = DemoMap.TRACKING_FROM,
-                                    initialDestinationId = DemoMap.TRACKING_TO,
-                                )
-                            }
-                        }
-                        val geofencingSession = remember { GeofencingSession(trackedPositionSession) }
+                        // Per-feature state lives here, at screen level, never inside the FAB's bottom
+                        // sheet (disposed on every close): see FeatureSessions.
+                        val resources = LocalResources.current
+                        val sessions = remember { FeatureSessions(feature, resources) }
                         FeatureMapScreen(
                             mapHash = if (feature == Feature.CustomData) DemoMap.CUSTOM_DATA_MAP_HASH else DemoMap.MAP_HASH,
                             titleRes = feature?.titleRes,
@@ -116,92 +67,10 @@ class MainActivity : ComponentActivity() {
                             },
                             onBack = { navController.popBackStack() },
                             screenContent = { webView, bridgeState ->
-                                when (feature) {
-                                    Feature.SimulatedPosition,
-                                    Feature.CameraLockOnPosition,
-                                    Feature.AccuracyCircleStyle,
-                                    -> TrackedPositionSimulationHost(
-                                        trackedPositionSession,
-                                        webView,
-                                        bridgeState.positionsResolved,
-                                    )
-                                    Feature.Geofencing -> GeofencingSimulationHost(
-                                        geofencingSession,
-                                        webView,
-                                        bridgeState.positionsResolved,
-                                        bridgeState.zoneResolved,
-                                    )
-                                    else -> Unit
-                                }
+                                FeatureScreenHost(feature, sessions, webView, bridgeState)
                             },
                             sheetContent = { webView, bridgeState ->
-                                when (feature) {
-                                    Feature.ResetView -> ResetViewOverlay(webView)
-                                    Feature.OccupancySimulated -> OccupancySimulationOverlay(webView)
-                                    Feature.PoiClick -> PoiClickOverlay(bridgeState.lastPoiClick)
-                                    Feature.GoToPoi -> GoToPoiOverlay(webView)
-                                    Feature.FloorSelector -> FloorSelectorOverlay(webView, bridgeState.floorSelector)
-                                    Feature.ComputeNavigation ->
-                                        ComputeNavigationOverlay(webView, bridgeState.navigationError)
-                                    Feature.UiPartVisibility -> UiPartVisibilityOverlay(webView)
-                                    Feature.NativeUiReplacement ->
-                                        NativeUiReplacementOverlay(webView, bridgeState.floorSelector)
-                                    Feature.SimulatedPosition ->
-                                        SimulatedPositionOverlay(trackedPositionSession, webView)
-                                    Feature.CameraLockOnPosition ->
-                                        CameraLockOnPositionOverlay(
-                                            trackedPositionSession,
-                                            webView,
-                                            bridgeState.isCameraLocked,
-                                        )
-                                    Feature.ClickableSurface -> ClickableSurfaceOverlay(webView)
-                                    Feature.CustomData -> CustomDataOverlay(webView, bridgeState.customDataLoaded)
-                                    Feature.CategoryHighlight ->
-                                        CategoryHighlightOverlay(webView, bridgeState.categoriesLoaded)
-                                    Feature.DynamicPoiCrud ->
-                                        DynamicPoiCrudOverlay(webView, bridgeState.dynamicPoiCreated)
-                                    Feature.RuntimeLocale -> RuntimeLocaleOverlay(webView, bridgeState.localeResolved)
-                                    Feature.ExploreMode ->
-                                        ExploreModeOverlay(webView, bridgeState.currentExploreMode)
-                                    Feature.AddLocale ->
-                                        AddLocaleOverlay(webView, bridgeState.addLocaleResolved)
-                                    Feature.Geofencing -> GeofencingOverlay(
-                                        geofencingSession,
-                                        webView,
-                                        bridgeState.isInsideGeofenceZone,
-                                    )
-                                    Feature.CustomBaseUrl -> CustomBaseUrlOverlay(
-                                        bridgeState.currentBaseUrl,
-                                        bridgeState.onReloadWithBaseUrl,
-                                    )
-                                    Feature.CustomNavigationTrace ->
-                                        CustomNavigationTraceOverlay(webView, bridgeState.navigationError)
-                                    Feature.NavigationExcludeModalities ->
-                                        NavigationExcludeModalitiesOverlay(webView, bridgeState.navigationError)
-                                    Feature.AccessibleMode ->
-                                        AccessibleModeOverlay(webView, bridgeState.navigationError)
-                                    Feature.IconMarker3d ->
-                                        IconMarker3dOverlay(webView, bridgeState.iconImagePlaced)
-                                    Feature.CustomTextLabel ->
-                                        CustomTextLabelOverlay(webView, bridgeState.textLabelPlaced)
-                                    Feature.HtmlOverlayMarker ->
-                                        HtmlOverlayMarkerOverlay(webView, bridgeState.htmlMarkerState)
-                                    Feature.CustomTheme -> CustomThemeOverlay(webView, bridgeState.themeState)
-                                    Feature.AccuracyCircleStyle -> AccuracyCircleStyleOverlay(
-                                        trackedPositionSession,
-                                        webView,
-                                        positionTrackerStyle,
-                                        onStyleChange = { positionTrackerStyle = it },
-                                    )
-                                    Feature.CameraProjectionToggle -> CameraProjectionToggleOverlay(
-                                        bridgeState.cameraProjection,
-                                        bridgeState.isMapReady,
-                                        bridgeState.onReloadWithCameraProjection,
-                                    )
-                                    Feature.CameraShowcaseCarousel ->
-                                        CameraShowcaseCarouselOverlay(webView, bridgeState.carouselState)
-                                    Feature.AuthToken, null -> Unit
-                                }
+                                FeatureSheetContent(feature, sessions, webView, bridgeState)
                             },
                         )
                     }
