@@ -4,8 +4,10 @@ import android.webkit.WebView
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
-import com.visioglobe.visioonemeet.R
+import com.visioglobe.visioonemeet.bridge.callBridge
+import com.visioglobe.visioonemeet.model.Feature
 import com.visioglobe.visioonemeet.ui.FeatureMapScreen
+import com.visioglobe.visioonemeet.ui.rememberFeatureMapState
 import kotlinx.coroutines.delay
 import org.json.JSONObject
 import kotlin.time.Duration
@@ -41,7 +43,7 @@ data class ProtectedMapOptions(
     val baseUrl: String,
     val authorizationToken: String,
 ) {
-    /** JSON handed to the page through the JS bridge (`MapBridge.getProtectedMapOptions`). */
+    /** JSON handed to the page through the JS bridge (`AndroidBridge.getProtectedMapOptions`). */
     fun toJson(): String = JSONObject()
         .put("vg_maphash", mapHash)
         .put("baseURL", baseUrl)
@@ -59,9 +61,7 @@ suspend fun fetchTokenFromYourBackend(): String = PROTECTED_MAP_TOKEN
  * Token refresh entry point: hands a fresh token to the loaded venue
  * (`venue.setAuthorizationToken`), used for every subsequent map request — no reload needed.
  */
-fun WebView.refreshAuthorizationToken(freshToken: String) {
-    evaluateJavascript("window.MapBridge.setAuthorizationToken(${JSONObject.quote(freshToken)})", null)
-}
+fun WebView.refreshAuthorizationToken(freshToken: String) = callBridge("setAuthorizationToken", freshToken)
 
 /**
  * A map screen loading the protected map: the page loads it with
@@ -79,22 +79,22 @@ fun ProtectedMapScreen(
         authorizationToken = PROTECTED_MAP_TOKEN,
     ),
 ) {
+    val map = rememberFeatureMapState()
+    val webView = map.webView
+    LaunchedEffect(webView, map.isMapReady) {
+        if (webView == null || !map.isMapReady) return@LaunchedEffect
+        while (true) {
+            delay(TOKEN_REFRESH_INTERVAL)
+            webView.refreshAuthorizationToken(fetchTokenFromYourBackend())
+        }
+    }
     FeatureMapScreen(
-        mapHash = options.mapHash,
-        titleRes = R.string.feature_auth_token_title,
+        map = map,
+        feature = Feature.AuthToken,
+        onBack = onBack,
         modifier = modifier,
+        mapHash = options.mapHash,
         protectedMap = options,
         showControlsFab = false,
-        onBack = onBack,
-        screenContent = { webView, bridgeState ->
-            LaunchedEffect(webView, bridgeState.isMapReady) {
-                if (webView == null || !bridgeState.isMapReady) return@LaunchedEffect
-                while (true) {
-                    delay(TOKEN_REFRESH_INTERVAL)
-                    webView.refreshAuthorizationToken(fetchTokenFromYourBackend())
-                }
-            }
-        },
-        sheetContent = { _, _ -> },
-    )
+    ) {}
 }
