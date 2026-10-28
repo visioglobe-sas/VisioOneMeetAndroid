@@ -8,21 +8,38 @@ The projection can only be chosen when the view is created, so switching it mean
 
 ## SDK usage
 
-JS side (`web/src/main.js`): read the requested projection from the page URL and pass it to `createView`, then report the projection the view was created with:
+JS side (`web/src/features/camera-projection-toggle.js`): read the requested projection from the page URL and pass it to `createView`, then report the projection the view was created with:
 
 ```js
+// web/src/features/camera-projection-toggle.js
 // Our own query parameter, NOT the SDK's `?orthographic` flag (see "Things to know").
-const requested = new URLSearchParams(window.location.search).get('cameraProjection');
-const cameraProjection = requested === 'orthographic' ? 'orthographic' : undefined; // undefined = SDK default 'perspective'
+const requestedCameraProjection = new URLSearchParams(window.location.search).get('cameraProjection');
+const cameraProjection = requestedCameraProjection === 'orthographic' ? 'orthographic' : undefined; // undefined = SDK default 'perspective'
 
-const visioOne = createVisioOne();
-venue = await visioOne.loadVenue({ vg_maphash: hash, baseURL });
-view = await visioOne.createView(container, venue, cameraProjection ? { cameraProjection } : undefined);
-// ... register view listeners (poiclick, currentfloorchanged, ...) as usual ...
+// This feature's createView options (merged by main.js).
+export function viewOptions() {
+  return cameraProjection ? { cameraProjection } : {};
+}
 
 // Read-only: the projection this view really uses.
-window.AndroidBridge?.onCameraProjectionReported(view.cameraProjection);
-window.AndroidBridge?.onMapReady();
+export function onViewCreated() {
+  notify('onCameraProjectionReported', view.cameraProjection);
+}
+```
+
+```js
+// web/src/main.js — every feature's viewOptions() is merged into the createView options
+setVenue(await visioOne.loadVenue(loadOptions, loaderContainer));
+const viewOptions = Object.assign({}, ...FEATURES.map((feature) => feature.viewOptions?.() ?? {}));
+setView(
+  await visioOne.createView(
+    container,
+    venue,
+    Object.keys(viewOptions).length > 0 ? viewOptions : undefined,
+  ),
+);
+FEATURES.forEach((feature) => feature.onViewCreated?.());
+notify('onMapReady');
 ```
 
 Signatures (SDK 1.1.0 typings):
@@ -33,28 +50,43 @@ Signatures (SDK 1.1.0 typings):
 Native side (Kotlin): there is no bridge call that changes the projection. Switching rebuilds the `WebView` against a new URL, and the reported value comes back through a `@JavascriptInterface` method:
 
 ```kotlin
-key(mapHash, requestedCameraProjection) {
+// app/src/main/java/com/visioglobe/visioonemeet/bridge/MapWebView.kt — the page URL
+fun pageUrl(): String {
+    val query = if (isProtected) {
+        "?protected=true"
+    } else {
+        "?vg_maphash=$mapHash&baseUrl=${URLEncoder.encode(baseUrl, "UTF-8")}" +
+            (if (enableShadows) "&enableShadows=true" else "") +
+            if (cameraProjection != DEFAULT_CAMERA_PROJECTION) "&cameraProjection=$cameraProjection" else ""
+    }
+    return "https://$ASSET_LOADER_DOMAIN/assets/www/index.html$query"
+}
+
+// app/src/main/java/com/visioglobe/visioonemeet/ui/FeatureMapScreen.kt — one WebView per page URL
+val pageOptions = MapPageOptions(
+    mapHash = mapHash,
+    baseUrl = map.baseUrl,
+    enableShadows = enableShadows,
+    cameraProjection = map.cameraProjection,
+    isProtected = protectedMap != null,
+)
+key(pageOptions, protectedMap) {
     AndroidView(
+        modifier = Modifier.fillMaxSize(),
         factory = { context ->
-            WebView(context).apply {
-                // ... settings, WebViewAssetLoader, addJavascriptInterface(bridge, "AndroidBridge") ...
-                loadUrl(
-                    "https://appassets.androidx.local/assets/www/index.html?vg_maphash=$mapHash" +
-                        if (requestedCameraProjection != "perspective") "&cameraProjection=$requestedCameraProjection" else "",
-                )
-            }
+            val bridge = NativeBridge(/* ... */ onEvent = map::emit)
+            createMapWebView(context, pageOptions, bridge).also { map.webView = it }
         },
         onRelease = { it.destroy() }, // don't leave the previous page (and its WebGL context) alive
     )
 }
 
-class MapBridge(private val onProjection: (String) -> Unit /* , ... */) {
-    @JavascriptInterface
-    fun onCameraProjectionReported(projection: String) = onProjection(projection) // called on a binder thread: post to main
-}
+// app/src/main/java/com/visioglobe/visioonemeet/bridge/NativeBridge.kt
+@JavascriptInterface
+fun onCameraProjectionReported(projection: String) = emit(BridgeEvent.CameraProjectionReported(projection))
 ```
 
-When `requestedCameraProjection` changes, the `key` changes too. Compose then disposes of the old `WebView` and creates a new one, which loads the venue and creates the view again with the new option.
+When `map.cameraProjection` changes (`map.reloadWithCameraProjection(newProjection)`), the page options, and so the `key`, change too. Compose then disposes of the old `WebView` and creates a new one, which loads the venue and creates the view again with the new option.
 
 ## Things to know
 

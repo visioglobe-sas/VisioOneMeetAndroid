@@ -7,6 +7,7 @@ Reacts to a tap on a POI by listening for the SDK's `poiclick` event on the `vie
 ## SDK usage
 
 ```js
+// web/src/features/poi-click.js
 function onPoiClick(event) {
   if (!venue) return;
   const locale = venue.currentLocale;
@@ -14,14 +15,24 @@ function onPoiClick(event) {
     id: poi.id,
     name: venue.translator.translatePOI(poi, locale).name,
   }));
-  bridge?.onPoiClick(JSON.stringify(pois));
+  notify('onPoiClick', JSON.stringify(pois));
 }
 
-view.addEventListener('poiclick', onPoiClick);
+export function onViewCreated() {
+  view.addEventListener('poiclick', onPoiClick);
+}
 ```
 ```kotlin
+// app/src/main/java/com/visioglobe/visioonemeet/bridge/NativeBridge.kt — exposed as window.AndroidBridge
 @JavascriptInterface
-fun onPoiClick(payload: String) = notifyPoiClick(payload)
+fun onPoiClick(payload: String) = emit(BridgeEvent.PoiClick(payload))
+```
+```kotlin
+// app/src/main/java/com/visioglobe/visioonemeet/features/PoiClick.kt
+OnBridgeEvent<BridgeEvent.PoiClick>(map) { event ->
+    lastPoiClick = parsePoiClickPayload(event.poisJson)
+    map.isSheetOpen = true
+}
 ```
 
 The native side only ever receives a JSON string, never a raw `POI` object — `POI` instances carry circular references and methods, which aren't serializable across a `@JavascriptInterface` boundary. The JS side always projects to a minimal `{ id, name }` shape first.

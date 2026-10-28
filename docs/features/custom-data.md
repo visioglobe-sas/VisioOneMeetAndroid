@@ -13,7 +13,7 @@ Reads free-form business key/value data (price, opening hours, product reference
 ## SDK usage
 
 ```js
-// web/src/main.js
+// web/src/features/custom-data.js (in `mapBridge`)
 async loadCustomData(requestId, placeId) {
   if (!venue) return;
   try {
@@ -23,27 +23,28 @@ async loadCustomData(requestId, placeId) {
     // rejects here instead of resolving empty; treated as "no data".
     console.warn('refreshCustomData failed, treating as no data available', error);
   }
-  const poi = venue.pois.find((p) => p.id === placeId);
+  const poi = findPoi(placeId); // venue.pois.find((p) => p.id === placeId)
   const customData = poi ? venue.getPOICustomData(poi) : null;
-  bridge?.onCustomDataLoaded(requestId, JSON.stringify(customData));
+  notify('onCustomDataLoaded', requestId, JSON.stringify(customData));
 },
 ```
 
 ```kotlin
-// app/src/main/java/com/visioglobe/visioonemeet/ui/FeatureOverlays.kt — native bridge wrappers
-private fun WebView.loadCustomData(requestId: Int, placeId: String) {
-    val script = "window.MapBridge.loadCustomData($requestId, ${JSONObject.quote(placeId)})"
-    evaluateJavascript(script, null)
-}
+// app/src/main/java/com/visioglobe/visioonemeet/features/CustomData.kt
+private fun WebView.loadCustomData(requestId: Int, placeId: String) = callBridge("loadCustomData", requestId, placeId)
 ```
 
-The result comes back asynchronously on the native side via a `@JavascriptInterface` callback:
+The result comes back asynchronously on the native side via a `@JavascriptInterface` callback, emitted as a typed event that the screen collects:
 
 ```kotlin
-// FeatureMapScreen.kt
+// app/src/main/java/com/visioglobe/visioonemeet/bridge/NativeBridge.kt
 @JavascriptInterface
 fun onCustomDataLoaded(requestId: Int, customDataJson: String) =
-    notifyCustomDataLoaded(requestId, customDataJson)
+    emit(BridgeEvent.CustomDataLoaded(requestId, customDataJson))
+```
+```kotlin
+// app/src/main/java/com/visioglobe/visioonemeet/features/CustomData.kt
+OnBridgeEvent<BridgeEvent.CustomDataLoaded>(map) { session.onLoaded(it) }
 ```
 
 `venue.refreshCustomData(): Promise<void>` and `venue.getPOICustomData(poi: POI): CustomData` are the two SDK calls exercised, where `CustomData` is `{ readonly [key: string]: string }`.

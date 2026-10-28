@@ -9,12 +9,12 @@ The label is owned by an existing "anchor" POI and placed next to that POI's own
 ## SDK usage
 
 ```js
-// web/src/main.js
+// web/src/shared/poi.js
 
 // POIs carry no direct lat/lng field. One helper gives a POI's display position:
 // its first label's position, else its first image's or marker's, else the
 // centroid of its first surface's outline. `excluded` skips our own objects.
-function poiDisplayPosition(poi, excluded = []) {
+export function poiDisplayPosition(poi, excluded = []) {
   const first = (items) => items?.find((item) => !excluded.includes(item))?.position;
   const position = first(poi.labels) ?? first(poi.images) ?? first(poi.markers);
   if (position) return position;
@@ -26,81 +26,100 @@ function poiDisplayPosition(poi, excluded = []) {
   };
 }
 
-let customTextLabel = null;
 const ANCHOR_OFFSET = 0.00004; // degrees, ~4 m
 
-// options = { text, color, width, height, rotation }
-placeTextLabel(requestId, anchorId, options) {
-  if (!venue) return;
-  const report = (status, extra) => {
-    bridge?.onTextLabelPlaced(requestId, JSON.stringify({ status, ...extra }));
-  };
-  // Validate everything first: a failed place leaves the current label untouched.
-  const text = String(options.text ?? '').trim();
-  if (!text) {
-    report('text-required');
-    return;
-  }
-  const anchor = venue.pois.find((p) => p.id === anchorId);
-  if (!anchor) {
-    report('anchor-not-found');
-    return;
-  }
-  const anchorPosition = poiDisplayPosition(anchor, [customTextLabel]);
-  if (!anchorPosition) {
-    report('anchor-has-no-position');
-    return;
-  }
-  removeCustomTextLabel(); // only one label at a time (venue.removeLabel)
-  const position = {
+export function offsetFromAnchor(anchorPosition) {
+  return {
     ...anchorPosition,
     latitude: anchorPosition.latitude + ANCHOR_OFFSET,
     longitude: anchorPosition.longitude + ANCHOR_OFFSET,
   };
-  try {
-    customTextLabel = venue.createLabel({
-      poi: anchor,
-      position,
-      width: options.width,
-      height: options.height, // always pass it, see "Things to know"
-      text,
-      color: options.color,
-      rotation: options.rotation,
-    });
-    report('placed', { poiId: anchor.id });
-  } catch (error) {
-    report('error', { message: String(error?.message ?? error) });
-  }
-},
+}
+```
 
-// options: any of { text }, { color }, { width, height } (width and height always together)
-updateTextLabel(options) {
-  if (!venue || !customTextLabel) return;
-  if (options.text !== undefined && !String(options.text).trim()) return;
-  venue.updateLabel(customTextLabel, options);
-},
+```js
+// web/src/features/custom-text-label.js
+let customTextLabel = null;
 
-// rotation is create-only: remove, then recreate with the same values.
-setTextLabelRotation(rotation) {
-  if (!venue || !customTextLabel) return;
-  const { poi, position, width, height, text, color } = customTextLabel;
-  removeCustomTextLabel();
-  customTextLabel = venue.createLabel({ poi, position, width, height, text, color, rotation });
-},
-
-removeTextLabel() {
+function removeCustomTextLabel() {
   if (!venue || !customTextLabel) return;
   venue.removeLabel(customTextLabel);
   customTextLabel = null;
-},
+}
+
+export const mapBridge = {
+  // options = { text, color, width, height, rotation }
+  placeTextLabel(requestId, anchorId, options) {
+    if (!venue) return;
+    const report = (status, extra) => {
+      notify('onTextLabelPlaced', requestId, JSON.stringify({ status, ...extra }));
+    };
+    // Validate everything first: a failed place leaves the current label untouched.
+    const text = String(options.text ?? '').trim();
+    if (!text) {
+      report('text-required');
+      return;
+    }
+    const anchor = findPoi(anchorId); // venue.pois.find((p) => p.id === anchorId)
+    if (!anchor) {
+      report('anchor-not-found');
+      return;
+    }
+    const anchorPosition = poiDisplayPosition(anchor, [customTextLabel]);
+    if (!anchorPosition) {
+      report('anchor-has-no-position');
+      return;
+    }
+    removeCustomTextLabel(); // only one label at a time (venue.removeLabel)
+    const position = offsetFromAnchor(anchorPosition);
+    try {
+      customTextLabel = venue.createLabel({
+        poi: anchor,
+        position,
+        width: options.width,
+        height: options.height, // always pass it, see "Things to know"
+        text,
+        color: options.color,
+        rotation: options.rotation,
+      });
+      report('placed', { poiId: anchor.id });
+    } catch (error) {
+      report('error', { message: String(error?.message ?? error) });
+    }
+  },
+
+  // options: any of { text }, { color }, { width, height } (width and height always together)
+  updateTextLabel(options) {
+    if (!venue || !customTextLabel) return;
+    if (options.text !== undefined && !String(options.text).trim()) return;
+    venue.updateLabel(customTextLabel, options);
+  },
+
+  // rotation is create-only: remove, then recreate with the same values.
+  setTextLabelRotation(rotation) {
+    if (!venue || !customTextLabel) return;
+    const { poi, position, width, height, text, color } = customTextLabel;
+    removeCustomTextLabel();
+    customTextLabel = venue.createLabel({ poi, position, width, height, text, color, rotation });
+  },
+
+  removeTextLabel() {
+    removeCustomTextLabel();
+  },
+};
 ```
 
-Native call sites (arguments are JSON-encoded before being interpolated into the script):
+Native call sites (`callBridge` JSON-encodes each argument before interpolating it into the script: the `anchorId` string is quoted, numbers and the `JSONObject` options are written as is):
 
 ```kotlin
-// app/src/main/java/com/visioglobe/visioonemeet/ui/FeatureOverlays.kt — native bridge wrappers
+// app/src/main/java/com/visioglobe/visioonemeet/features/CustomTextLabel.kt
 private fun WebView.placeTextLabel(
-    requestId: Int, anchorId: String, text: String, color: String, size: TextLabelSize, rotation: Int,
+    requestId: Int,
+    anchorId: String,
+    text: String,
+    color: String,
+    size: TextLabelSize,
+    rotation: Int,
 ) {
     val options = JSONObject()
         .put("text", text)
@@ -108,32 +127,30 @@ private fun WebView.placeTextLabel(
         .put("width", size.width)
         .put("height", size.height)
         .put("rotation", rotation)
-    evaluateJavascript("window.MapBridge.placeTextLabel($requestId, ${JSONObject.quote(anchorId)}, $options)", null)
+    callBridge("placeTextLabel", requestId, anchorId, options)
 }
 
-private fun WebView.updateTextLabel(options: JSONObject) {
-    evaluateJavascript("window.MapBridge.updateTextLabel($options)", null)
-}
+private fun WebView.updateTextLabel(options: JSONObject) = callBridge("updateTextLabel", options)
 
-private fun WebView.setTextLabelRotation(rotation: Int) {
-    evaluateJavascript("window.MapBridge.setTextLabelRotation($rotation)", null)
-}
+private fun WebView.setTextLabelRotation(rotation: Int) = callBridge("setTextLabelRotation", rotation)
 
-private fun WebView.removeTextLabel() {
-    evaluateJavascript("window.MapBridge.removeTextLabel()", null)
-}
+private fun WebView.removeTextLabel() = callBridge("removeTextLabel")
 
 // e.g. a color change, then a size change, while a label is placed:
-webView.updateTextLabel(JSONObject().put("color", "#43A047"))
-webView.updateTextLabel(JSONObject().put("width", 22).put("height", 4))
+webView?.updateTextLabel(JSONObject().put("color", hex))
+webView?.updateTextLabel(JSONObject().put("width", size.width).put("height", size.height))
 ```
 
 `placeTextLabel`'s result comes back asynchronously, echoing `requestId`, same convention as `3d-icon-marker.md`'s `placeIconImage`:
 
 ```kotlin
-// FeatureMapScreen.kt
+// app/src/main/java/com/visioglobe/visioonemeet/bridge/NativeBridge.kt
 @JavascriptInterface
-fun onTextLabelPlaced(requestId: Int, resultJson: String) = notifyTextLabelPlaced(requestId, resultJson)
+fun onTextLabelPlaced(requestId: Int, resultJson: String) = emit(BridgeEvent.TextLabelPlaced(requestId, resultJson))
+```
+```kotlin
+// app/src/main/java/com/visioglobe/visioonemeet/features/CustomTextLabel.kt
+OnBridgeEvent<BridgeEvent.TextLabelPlaced>(map) { session.onPlaced(map.webView, it) }
 ```
 
 On a `"placed"` result, the app then moves the camera to the anchor POI with goto-poi's own `view.goToPOI()` call (see "Things to know").

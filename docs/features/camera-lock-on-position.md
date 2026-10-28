@@ -11,33 +11,41 @@ The SDK changes this flag on its own (tracking start/stop, user pan), so the swi
 JS side — the setter, plus the events that report the resulting state back to native:
 
 ```js
-setCameraLockOnPosition(locked) {
-  if (!view) return;
-  view.lockCameraPositionOnTracking = locked;
-},
-
+// web/src/features/camera-lock-on-position.js
 // None of these events carries the lock value: read it from the view.
 function onTrackingStateChanged() {
   if (!view) return;
-  bridge?.onCameraLockChanged(view.lockCameraPositionOnTracking);
+  notify('onCameraLockChanged', view.lockCameraPositionOnTracking);
 }
 
-// Subscribed once, right after createView():
-view.addEventListener('trackingon', onTrackingStateChanged);
-view.addEventListener('trackingoff', onTrackingStateChanged);
-view.addEventListener('trackingchanged', onTrackingStateChanged);
+// Run once, right after createView():
+export function onViewCreated() {
+  view.addEventListener('trackingon', onTrackingStateChanged);
+  view.addEventListener('trackingoff', onTrackingStateChanged);
+  view.addEventListener('trackingchanged', onTrackingStateChanged);
+}
+
+export const mapBridge = {
+  setCameraLockOnPosition(locked) {
+    if (!view) return;
+    view.lockCameraPositionOnTracking = locked;
+  },
+};
 ```
 
 Native side:
 
 ```kotlin
-private fun WebView.setCameraLockOnPosition(locked: Boolean) {
-    evaluateJavascript("window.MapBridge.setCameraLockOnPosition($locked)", null)
-}
+// app/src/main/java/com/visioglobe/visioonemeet/features/CameraLockOnPosition.kt
+private fun WebView.setCameraLockOnPosition(locked: Boolean) = callBridge("setCameraLockOnPosition", locked)
 
-// Exposed to JS as window.AndroidBridge (addJavascriptInterface)
+// app/src/main/java/com/visioglobe/visioonemeet/bridge/NativeBridge.kt
+// (exposed to JS as window.AndroidBridge with addJavascriptInterface)
 @JavascriptInterface
-fun onCameraLockChanged(locked: Boolean) = notifyCameraLockChanged(locked)
+fun onCameraLockChanged(locked: Boolean) = emit(BridgeEvent.CameraLockChanged(locked))
+
+// CameraLockOnPosition.kt — the screen collects it
+OnBridgeEvent<BridgeEvent.CameraLockChanged>(map) { isCameraLocked = it.locked }
 ```
 
 The switch's `checked` value is the last `locked` received from `onCameraLockChanged`; toggling it only calls `setCameraLockOnPosition(newValue)` and lets the event update the UI.
@@ -49,5 +57,5 @@ The switch's `checked` value is the last `locked` received from `onCameraLockCha
 - **A user pan turns the lock off**: manipulating the map while the camera is locked sets `lockCameraPositionOnTracking` to `false` and dispatches `trackingchanged` — the consumer-GPS-app "touching the map unlocks" behavior is built in.
 - Setting `lockCameraPositionOnTracking` dispatches `trackingchanged`, but the setter is a no-op (no event) when the value is unchanged or when `allowTracking` is `false`. It doesn't throw in that case — unlike `injectTrackedPosition`, it simply has no effect until tracking is active.
 - `trackingon` / `trackingoff` / `trackingchanged` carry no lock value: read `view.lockCameraPositionOnTracking` in the handler. Listening to all three is what keeps a UI in sync with the SDK.
-- `locked` is a boolean argument — no `JSONObject.quote()` needed, same as the numeric arguments used by `injectTrackedPosition`.
+- `locked` is a plain JS boolean: `callBridge` JSON-encodes each argument, writing a boolean (like the numbers passed to `injectTrackedPosition`) as is, so the page receives `true`/`false`, not a string.
 - `view.lockCameraOrientationOnTracking` is a separate flag that locks the camera's *orientation* to device-orientation data injected via `injectDeviceOrientation` — a third state ("locked position + orientation") beyond free/locked-position. That needs an additional orientation data source and isn't covered here.

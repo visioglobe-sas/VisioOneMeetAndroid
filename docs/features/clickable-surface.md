@@ -7,9 +7,10 @@ Makes a POI's surface(s) interactive via `venue.updateSurface(surface, options)`
 ## SDK usage
 
 ```js
+// web/src/features/clickable-surface.js (mapBridge)
 setSurfaceInteractive(placeId, interactive) {
   if (!venue) return;
-  const poi = venue.pois.find((p) => p.id === placeId);
+  const poi = findPoi(placeId); // venue.pois.find((p) => p.id === placeId)
   if (!poi) return;
   poi.surfaces.forEach((surface) => {
     venue.updateSurface(
@@ -25,10 +26,9 @@ setSurfaceInteractive(placeId, interactive) {
 Native call site:
 
 ```kotlin
-private fun WebView.setSurfaceInteractive(placeId: String, interactive: Boolean) {
-    val script = "window.MapBridge.setSurfaceInteractive(${JSONObject.quote(placeId)}, $interactive)"
-    evaluateJavascript(script, null)
-}
+// app/src/main/java/com/visioglobe/visioonemeet/features/ClickableSurface.kt
+private fun WebView.setSurfaceInteractive(placeId: String, interactive: Boolean) =
+    callBridge("setSurfaceInteractive", placeId, interactive)
 ```
 
 ## Things to know

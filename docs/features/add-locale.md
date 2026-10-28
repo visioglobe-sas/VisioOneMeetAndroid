@@ -7,46 +7,47 @@ Adds a brand-new locale at runtime — `'es'` (Spanish), never authored anywhere
 ## SDK usage
 
 ```js
-// web/src/main.js
+// web/src/features/add-locale.js
 const ADD_LOCALE_RESOURCES = {
   'search-for-anything': 'Busca lo que quieras',
   'welcome-message': '¡Bienvenido al mapa!',
 };
 
-addSpanishLocale(requestId) {
-  if (!venue) return;
-  try {
-    venue.translator.addLocale('es', ADD_LOCALE_RESOURCES);
-    const translations = {};
-    Object.keys(ADD_LOCALE_RESOURCES).forEach((key) => {
-      translations[key] = venue.translator.translate(key, 'es');
-    });
-    bridge?.onAddLocaleResolved(requestId, JSON.stringify({ status: 'ok', translations }));
-  } catch (error) {
-    bridge?.onAddLocaleResolved(
-      requestId,
-      JSON.stringify({ status: 'error', message: String(error?.message ?? error) }),
-    );
-  }
-},
+export const mapBridge = {
+  addSpanishLocale(requestId) {
+    if (!venue) return;
+    try {
+      venue.translator.addLocale('es', ADD_LOCALE_RESOURCES);
+      const translations = {};
+      Object.keys(ADD_LOCALE_RESOURCES).forEach((key) => {
+        translations[key] = venue.translator.translate(key, 'es');
+      });
+      notify('onAddLocaleResolved', requestId, JSON.stringify({ status: 'ok', translations }));
+    } catch (error) {
+      notify(
+        'onAddLocaleResolved',
+        requestId,
+        JSON.stringify({ status: 'error', message: String(error?.message ?? error) }),
+      );
+    }
+  },
+};
 ```
 
 Native call site:
 
 ```kotlin
-// app/src/main/java/com/visioglobe/visioonemeet/ui/FeatureOverlays.kt — native bridge wrappers
-private fun WebView.addSpanishLocale(requestId: Int) {
-    val script = "window.MapBridge.addSpanishLocale($requestId)"
-    evaluateJavascript(script, null)
-}
+// app/src/main/java/com/visioglobe/visioonemeet/features/AddLocale.kt
+private fun WebView.addSpanishLocale(requestId: Int) = callBridge("addSpanishLocale", requestId)
 ```
 
 The result comes back asynchronously through the native bridge, echoing `requestId`, same convention as `runtime-locale.md`'s `getCurrentLocale`/`setLocale`:
 
 ```kotlin
-// FeatureMapScreen.kt
+// app/src/main/java/com/visioglobe/visioonemeet/bridge/NativeBridge.kt
 @JavascriptInterface
-fun onAddLocaleResolved(requestId: Int, resultJson: String) = notifyAddLocaleResolved(requestId, resultJson)
+fun onAddLocaleResolved(requestId: Int, resultJson: String) =
+    emit(BridgeEvent.AddLocaleResolved(requestId, resultJson))
 ```
 
 `venue.translator.addLocale(locale: string, resources: Resources): void` creates (or overwrites) a locale, where `Resources` is a flat `{[key: string]: string}` map. `venue.translator.translate(key: string, locale: string, context?): string` reads a value back for a given locale. The secondary "Switch to Spanish" button in this demo reuses `venue.setCurrentLocale('es')` (`runtime-locale`'s own call) verbatim, with no changes.

@@ -9,102 +9,96 @@ The image is owned by an existing "anchor" POI and placed at that POI's own posi
 ## SDK usage
 
 ```js
-// web/src/main.js
+// web/src/features/3d-icon-marker.js
+import { notify } from '../bridge.js';
+import { venue } from '../context.js';
+import { findPoi, poiDisplayPosition } from '../shared/poi.js';
 
-// POIs carry no direct lat/lng field. One helper gives a POI's display position:
-// its first label's position, else its first image's or marker's, else the
-// centroid of its first surface's outline. `excluded` skips our own objects.
-function poiDisplayPosition(poi, excluded = []) {
-  const first = (items) => items?.find((item) => !excluded.includes(item))?.position;
-  const position = first(poi.labels) ?? first(poi.images) ?? first(poi.markers);
-  if (position) return position;
-  const vertices = poi.surfaces?.[0]?.positions;
-  if (!vertices?.length) return undefined;
-  return {
-    latitude: vertices.reduce((sum, p) => sum + p.latitude, 0) / vertices.length,
-    longitude: vertices.reduce((sum, p) => sum + p.longitude, 0) / vertices.length,
-  };
-}
+// poiDisplayPosition (web/src/shared/poi.js): POIs carry no direct lat/lng field,
+// so it returns the POI's first label's position, else its first image's or
+// marker's, else the centroid of its first surface's outline. `excluded` skips
+// our own objects.
 
 const ICON_DATA_URL = 'data:image/png;base64,iVBORw0KGgo...';
 
 // Images created at runtime, keyed by an id chosen by the native side.
 const iconImages = new Map();
 
-placeIconImage(requestId, imageId, anchorId, orientationType) {
-  if (!venue) return;
-  const report = (status, extra) => {
-    bridge?.onIconImagePlaced(requestId, JSON.stringify({ status, ...extra }));
-  };
-  const anchor = venue.pois.find((p) => p.id === anchorId);
-  if (!anchor) {
-    report('anchor-not-found');
-    return;
-  }
-  const position = poiDisplayPosition(anchor, [iconImages.get(imageId)]); // skip our own image
-  if (!position) {
-    report('anchor-has-no-position');
-    return;
-  }
-  removeIconImageById(imageId); // only one image per id (venue.removeImage)
-  try {
-    const image = venue.createImage({
-      poi: anchor,
-      position,
-      width: 6,
-      height: 6,
-      url: ICON_DATA_URL,
-      orientationType, // 'fixed' | 'flat' | 'facing'
-    });
-    iconImages.set(imageId, image);
-    report('placed', { poiId: anchor.id });
-  } catch (error) {
-    report('error', { message: String(error?.message ?? error) });
-  }
-},
-
-updateIconImageOrientation(imageId, orientationType) {
-  const image = iconImages.get(imageId);
-  if (!venue || !image) return;
-  venue.updateImage(image, { orientationType });
-},
-
-removeIconImage(imageId) {
+function removeIconImageById(imageId) {
   const image = iconImages.get(imageId);
   if (!venue || !image) return;
   venue.removeImage(image);
   iconImages.delete(imageId);
-},
+}
+
+export const mapBridge = {
+  placeIconImage(requestId, imageId, anchorId, orientationType) {
+    if (!venue) return;
+    const report = (status, extra) => {
+      notify('onIconImagePlaced', requestId, JSON.stringify({ status, ...extra }));
+    };
+    const anchor = findPoi(anchorId);
+    if (!anchor) {
+      report('anchor-not-found');
+      return;
+    }
+    // Our own previous image (once placed, one of anchor.images) is skipped.
+    const position = poiDisplayPosition(anchor, [iconImages.get(imageId)]);
+    if (!position) {
+      report('anchor-has-no-position');
+      return;
+    }
+    removeIconImageById(imageId); // only one image per id (venue.removeImage)
+    try {
+      const image = venue.createImage({
+        poi: anchor,
+        position,
+        width: 6,
+        height: 6,
+        url: ICON_DATA_URL,
+        orientationType, // 'fixed' | 'flat' | 'facing'
+      });
+      iconImages.set(imageId, image);
+      report('placed', { poiId: anchor.id });
+    } catch (error) {
+      report('error', { message: String(error?.message ?? error) });
+    }
+  },
+
+  updateIconImageOrientation(imageId, orientationType) {
+    const image = iconImages.get(imageId);
+    if (!venue || !image) return;
+    venue.updateImage(image, { orientationType });
+  },
+
+  removeIconImage(imageId) {
+    removeIconImageById(imageId);
+  },
+};
 ```
 
 Native call sites:
 
 ```kotlin
-// app/src/main/java/com/visioglobe/visioonemeet/ui/FeatureOverlays.kt — native bridge wrappers
-private fun WebView.placeIconImage(requestId: Int, anchorId: String, orientationType: String) {
-    val script = "window.MapBridge.placeIconImage(" +
-        "$requestId, ${JSONObject.quote(ICON_MARKER_IMAGE_ID)}, ${JSONObject.quote(anchorId)}, " +
-        "${JSONObject.quote(orientationType)})"
-    evaluateJavascript(script, null)
-}
+// app/src/main/java/com/visioglobe/visioonemeet/features/IconMarker3d.kt
+private fun WebView.placeIconImage(requestId: Int, anchorId: String, orientationType: String) =
+    callBridge("placeIconImage", requestId, ICON_MARKER_IMAGE_ID, anchorId, orientationType)
 
-private fun WebView.updateIconImageOrientation(orientationType: String) {
-    val script = "window.MapBridge.updateIconImageOrientation(" +
-        "${JSONObject.quote(ICON_MARKER_IMAGE_ID)}, ${JSONObject.quote(orientationType)})"
-    evaluateJavascript(script, null)
-}
+private fun WebView.updateIconImageOrientation(orientationType: String) =
+    callBridge("updateIconImageOrientation", ICON_MARKER_IMAGE_ID, orientationType)
 
-private fun WebView.removeIconImage() {
-    evaluateJavascript("window.MapBridge.removeIconImage(${JSONObject.quote(ICON_MARKER_IMAGE_ID)})", null)
-}
+private fun WebView.removeIconImage() = callBridge("removeIconImage", ICON_MARKER_IMAGE_ID)
 ```
 
 `placeIconImage`'s result comes back asynchronously, echoing `requestId`, same convention as `dynamic-poi-crud.md`'s `createDynamicPoi`:
 
 ```kotlin
-// FeatureMapScreen.kt
+// app/src/main/java/com/visioglobe/visioonemeet/bridge/NativeBridge.kt
 @JavascriptInterface
-fun onIconImagePlaced(requestId: Int, resultJson: String) = notifyIconImagePlaced(requestId, resultJson)
+fun onIconImagePlaced(requestId: Int, resultJson: String) = emit(BridgeEvent.IconImagePlaced(requestId, resultJson))
+
+// app/src/main/java/com/visioglobe/visioonemeet/features/IconMarker3d.kt — the screen collects it
+OnBridgeEvent<BridgeEvent.IconImagePlaced>(map) { session.onPlaced(map.webView, it) }
 ```
 
 On a `"placed"` result, the app then moves the camera to the anchor POI with goto-poi's own `view.goToPOI()` call (see "Things to know").

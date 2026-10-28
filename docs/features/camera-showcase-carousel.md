@@ -8,9 +8,9 @@ It is built on the SDK's camera animations, `view.goToFloor()` and `view.goToPOI
 
 ## SDK usage
 
-The whole loop runs in the web page (`web/src/main.js`), not on the native side. The page lives exactly as long as the map screen, so there is always exactly one loop. It keeps running while native UI is shown over the map, and it ends with the `WebView`.
+The whole loop runs in the web page (`web/src/features/camera-showcase-carousel.js`), not on the native side. The page lives exactly as long as the map screen, so there is always exactly one loop. It keeps running while native UI is shown over the map, and it ends with the `WebView`.
 
-JS side: one hop is `goToFloor` then `goToPOI`, then a dwell. After every `await`, the loop checks that it is still the current run, and that the animation was not interrupted by another camera animation:
+JS side: one hop is `goToFloor` then `goToPOI`, then a dwell. After every `await`, the loop checks that it is still the current run, and that the animation was not interrupted by another camera animation (condensed from `web/src/features/camera-showcase-carousel.js`, where the names are prefixed with `carousel`):
 
 ```js
 const STOPS = ['B4-UL00-ID0009', 'B1-LL01-ID0152', 'B3-UL00-ID0064', 'B4-UL03-ID0015'];
@@ -74,17 +74,19 @@ Signatures (SDK 1.1.0 typings):
 Native side (Kotlin): two commands, and one callback that reports every state change. A state change can also happen in the page on its own, after a touch or when the idle timer fires, so the native UI should render the last reported snapshot rather than keep its own copy:
 
 ```kotlin
+// app/src/main/java/com/visioglobe/visioonemeet/features/CameraShowcaseCarousel.kt
 // The stop POI ids live on the native side (DemoMap.CAROUSEL_STOP_IDS in model/DemoMap.kt) and are
-// passed on Start; the page keeps them as its STOPS list.
-val stops = JSONArray(listOf("B4-UL00-ID0009", "B1-LL01-ID0152", "B3-UL00-ID0064", "B4-UL03-ID0015"))
-webView.evaluateJavascript("window.MapBridge.carouselStart($stops)", null) // from the first stop, or right away when paused
-webView.evaluateJavascript("window.MapBridge.carouselStop()", null)
+// passed on Start; callBridge sends the list as a JS array, which the page keeps as its stops.
+private fun WebView.carouselStart() = callBridge("carouselStart", DemoMap.CAROUSEL_STOP_IDS) // from the first stop, or right away when paused
+private fun WebView.carouselStop() = callBridge("carouselStop")
 
-class MapBridge(private val onCarouselState: (String) -> Unit /* , ... */) {
-    // {"state":"running"|"paused"|"stopped","stopIndex":1,"stopCount":4,"poiId":"B1-LL01-ID0152","resumeAfterMs":10000}
-    @JavascriptInterface
-    fun onCarouselStateChanged(stateJson: String) = onCarouselState(stateJson) // called on a binder thread: post to main
-}
+// app/src/main/java/com/visioglobe/visioonemeet/bridge/NativeBridge.kt
+// {"state":"running"|"paused"|"stopped","stopIndex":1,"stopCount":4,"poiId":"B1-LL01-ID0152","resumeAfterMs":10000}
+@JavascriptInterface
+fun onCarouselStateChanged(stateJson: String) = emit(BridgeEvent.CarouselStateChanged(stateJson))
+
+// CameraShowcaseCarousel.kt — the screen keeps the last reported snapshot
+OnBridgeEvent<BridgeEvent.CarouselStateChanged>(map) { carouselState = parseCarouselStatePayload(it.stateJson) }
 ```
 
 ## Things to know

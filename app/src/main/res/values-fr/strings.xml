@@ -86,7 +86,7 @@
     <string name="carousel_hint">Toucher la carte met la visite en pause ; elle reprend seule après %1$d s.</string>
     <string name="feature_auth_token_title">Carte protégée (jeton)</string>
     <string name="feature_auth_token_description">Exemple de code : charger une carte protégée par un jeton d\'autorisation</string>
-    <string name="auth_token_sample_text">Cette fonctionnalité est uniquement un exemple de code : cette démo n\'a pas de carte protégée à charger. Voir app/src/main/java/com/visioglobe/visioonemeet/sample/ProtectedMapSample.kt, loadProtectedVenue dans web/src/main.js et docs/features/auth-token.md, puis remplacer le hash de carte et le jeton fictifs par vos propres valeurs.</string>
+    <string name="auth_token_sample_text">Cette fonctionnalité est uniquement un exemple de code : cette démo n\'a pas de carte protégée à charger. Voir app/src/main/java/com/visioglobe/visioonemeet/sample/ProtectedMapSample.kt, web/src/features/auth-token.js et docs/features/auth-token.md, puis remplacer le hash de carte et le jeton fictifs par vos propres valeurs.</string>
     <string name="auth_token_unauthorized_error">Jeton d\'autorisation invalide, expiré ou absent.</string>
     <!-- Valeurs par défaut des champs de saisie des features (textes de démo). -->
     <string name="dynamic_poi_default_label">POI de démo</string>

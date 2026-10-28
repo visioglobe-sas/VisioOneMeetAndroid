@@ -11,26 +11,18 @@ The marker is owned by an existing "anchor" POI and placed next to that POI's ow
 ## SDK usage
 
 ```js
-// web/src/main.js
+// web/src/features/html-overlay-marker.js
+import { notify } from '../bridge.js';
+import { venue } from '../context.js';
+import { findPoi, offsetFromAnchor, poiDisplayPosition } from '../shared/poi.js';
+import { clearSelectedPoi, goToPoi } from './goto-poi.js';
 
-// POIs carry no direct lat/lng field. One helper gives a POI's display position:
-// its first label's position, else its first image's or marker's, else the
-// centroid of its first surface's outline. `excluded` skips our own objects.
-function poiDisplayPosition(poi, excluded = []) {
-  const first = (items) => items?.find((item) => !excluded.includes(item))?.position;
-  const position = first(poi.labels) ?? first(poi.images) ?? first(poi.markers);
-  if (position) return position;
-  const vertices = poi.surfaces?.[0]?.positions;
-  if (!vertices?.length) return undefined;
-  return {
-    latitude: vertices.reduce((sum, p) => sum + p.latitude, 0) / vertices.length,
-    longitude: vertices.reduce((sum, p) => sum + p.longitude, 0) / vertices.length,
-  };
-}
+// poiDisplayPosition (web/src/shared/poi.js): POIs carry no direct lat/lng field, so it returns
+// the POI's first label's position, else its first image's or marker's, else the centroid of its
+// first surface's outline; `excluded` skips our own objects. offsetFromAnchor adds ~4 m.
 
 let htmlMarker = null;
 let htmlMarkerTapCount = 0;
-const OFFSET = 0.00004; // degrees, ~4 m
 
 // No transform/translate/position/top/left here: the SDK owns them (see "Things to know").
 const HTML_MARKER_STYLE =
@@ -39,108 +31,111 @@ const HTML_MARKER_STYLE =
 
 // Reports the marker's whole state to native after every command and every tap.
 function reportHtmlMarkerState(status, extra) {
-  bridge?.onHtmlMarkerStateChanged(JSON.stringify({
-    status,
-    placedOnPoiId: htmlMarker?.poi.id ?? null,
-    isVisible: htmlMarker?.isVisible ?? true,
-    tapCount: htmlMarkerTapCount,
-    ...extra,
-  }));
+  notify(
+    'onHtmlMarkerStateChanged',
+    JSON.stringify({
+      status,
+      placedOnPoiId: htmlMarker?.poi.id ?? null,
+      isVisible: htmlMarker?.isVisible ?? true,
+      tapCount: htmlMarkerTapCount,
+      ...extra,
+    }),
+  );
 }
 
-placeHtmlMarker(anchorId, text) {
-  if (!venue) return;
-  // Validate everything first: a failed place leaves the current marker untouched.
-  const trimmed = String(text ?? '').trim();
-  if (!trimmed) return reportHtmlMarkerState('text-required');
-  const anchor = venue.pois.find((p) => p.id === anchorId);
-  if (!anchor) return reportHtmlMarkerState('anchor-not-found');
-  const anchorPosition = poiDisplayPosition(anchor, [htmlMarker]);
-  if (!anchorPosition) return reportHtmlMarkerState('anchor-has-no-position');
-
-  removeHtmlMarkerSilently(); // only one marker at a time (venue.removeMarker)
-  const position = {
-    ...anchorPosition,
-    latitude: anchorPosition.latitude + OFFSET,
-    longitude: anchorPosition.longitude + OFFSET,
-  };
-  const element = document.createElement('div');
-  element.style.cssText = HTML_MARKER_STYLE;
-  element.textContent = trimmed;
-  try {
-    const marker = venue.createMarker({ poi: anchor, position, element });
-    element.style.pointerEvents = 'auto'; // the SDK set it to 'none' (see "Things to know")
-    element.addEventListener('click', (event) => {
-      event.stopPropagation(); // don't let the tap reach the map underneath
-      if (htmlMarker !== marker) return;
-      htmlMarkerTapCount += 1;
-      reportHtmlMarkerState('tapped');
-    });
-    htmlMarker = marker;
-    htmlMarkerTapCount = 0;
-    reportHtmlMarkerState('placed');
-    goToPoi(anchor); // view.goToPOI(): show the anchor's floor
-  } catch (error) {
-    reportHtmlMarkerState('error', { message: String(error?.message ?? error) });
-  }
-},
-
-// No SDK call: marker.element is a live DOM node.
-updateHtmlMarkerText(text) {
-  if (!venue || !htmlMarker) return;
-  const trimmed = String(text ?? '').trim();
-  if (!trimmed) return reportHtmlMarkerState('text-required');
-  htmlMarker.element.textContent = trimmed;
-  reportHtmlMarkerState('text-updated');
-},
-
-setHtmlMarkerVisible(isVisible) {
-  if (!venue || !htmlMarker) return;
-  venue.updateMarker(htmlMarker, { isVisible });
-  reportHtmlMarkerState(isVisible ? 'shown' : 'hidden');
-},
-
-removeHtmlMarker() {
-  if (!venue || !htmlMarker) return;
-  removeHtmlMarkerSilently(); // venue.removeMarker(htmlMarker) — also detaches the element from the DOM
-  clearSelectedPoi(); // revert goToPoi's highlight
-  reportHtmlMarkerState('removed');
-},
+export const mapBridge = {
+  placeHtmlMarker(anchorId, text) {
+    if (!venue) return;
+    // Validate everything first: a failed place leaves the current marker untouched.
+    const trimmed = String(text ?? '').trim();
+    if (!trimmed) {
+      reportHtmlMarkerState('text-required');
+      return;
+    }
+    const anchor = findPoi(anchorId);
+    if (!anchor) {
+      reportHtmlMarkerState('anchor-not-found');
+      return;
+    }
+    const anchorPosition = poiDisplayPosition(anchor, [htmlMarker]);
+    if (!anchorPosition) {
+      reportHtmlMarkerState('anchor-has-no-position');
+      return;
+    }
+    removeHtmlMarkerSilently(); // only one marker at a time (venue.removeMarker)
+    const position = offsetFromAnchor(anchorPosition);
+    const element = document.createElement('div');
+    element.style.cssText = HTML_MARKER_STYLE;
+    element.textContent = trimmed;
+    try {
+      const marker = venue.createMarker({ poi: anchor, position, element });
+      element.style.pointerEvents = 'auto'; // the SDK set it to 'none' (see "Things to know")
+      element.addEventListener('click', (event) => {
+        event.stopPropagation(); // don't let the tap reach the map underneath
+        if (htmlMarker !== marker) return;
+        htmlMarkerTapCount += 1;
+        reportHtmlMarkerState('tapped');
+      });
+      htmlMarker = marker;
+      htmlMarkerTapCount = 0;
+      reportHtmlMarkerState('placed');
+      goToPoi(anchor); // view.goToPOI(): show the anchor's floor
+    } catch (error) {
+      reportHtmlMarkerState('error', { message: String(error?.message ?? error) });
+    }
+  },
+  // No SDK call: marker.element is a live DOM node.
+  updateHtmlMarkerText(text) {
+    if (!venue || !htmlMarker) return;
+    const trimmed = String(text ?? '').trim();
+    if (!trimmed) {
+      reportHtmlMarkerState('text-required');
+      return;
+    }
+    htmlMarker.element.textContent = trimmed;
+    reportHtmlMarkerState('text-updated');
+  },
+  setHtmlMarkerVisible(isVisible) {
+    if (!venue || !htmlMarker) return;
+    venue.updateMarker(htmlMarker, { isVisible });
+    reportHtmlMarkerState(isVisible ? 'shown' : 'hidden');
+  },
+  removeHtmlMarker() {
+    if (!venue || !htmlMarker) return;
+    removeHtmlMarkerSilently(); // venue.removeMarker(htmlMarker) — also detaches the element from the DOM
+    clearSelectedPoi(); // revert goToPoi's highlight
+    reportHtmlMarkerState('removed');
+  },
+};
 ```
 
-Native call sites (string arguments are JSON-quoted before being interpolated into the script):
+Native call sites (`callBridge` JSON-encodes each argument: strings with `JSONObject.quote`, the boolean as is):
 
 ```kotlin
-// app/src/main/java/com/visioglobe/visioonemeet/ui/FeatureOverlays.kt — native bridge wrappers
-private fun WebView.placeHtmlMarker(anchorId: String, text: String) {
-    evaluateJavascript(
-        "window.MapBridge.placeHtmlMarker(${JSONObject.quote(anchorId)}, ${JSONObject.quote(text)})",
-        null,
-    )
-}
+// app/src/main/java/com/visioglobe/visioonemeet/features/HtmlOverlayMarker.kt
+private fun WebView.placeHtmlMarker(anchorId: String, text: String) = callBridge("placeHtmlMarker", anchorId, text)
 
-private fun WebView.updateHtmlMarkerText(text: String) {
-    evaluateJavascript("window.MapBridge.updateHtmlMarkerText(${JSONObject.quote(text)})", null)
-}
+private fun WebView.updateHtmlMarkerText(text: String) = callBridge("updateHtmlMarkerText", text)
 
-private fun WebView.setHtmlMarkerVisible(isVisible: Boolean) {
-    evaluateJavascript("window.MapBridge.setHtmlMarkerVisible($isVisible)", null)
-}
+private fun WebView.setHtmlMarkerVisible(isVisible: Boolean) = callBridge("setHtmlMarkerVisible", isVisible)
 
-private fun WebView.removeHtmlMarker() {
-    evaluateJavascript("window.MapBridge.removeHtmlMarker()", null)
-}
+private fun WebView.removeHtmlMarker() = callBridge("removeHtmlMarker")
 ```
 
 Every outcome — including a tap on the badge — comes back through one bridge method, carrying a JSON snapshot such as `{"status":"tapped","placedOnPoiId":"B4-UL00-ID0009","isVisible":true,"tapCount":3}`:
 
 ```kotlin
-// FeatureMapScreen.kt — exposed as window.AndroidBridge via addJavascriptInterface
+// app/src/main/java/com/visioglobe/visioonemeet/bridge/NativeBridge.kt — exposed as window.AndroidBridge
 @JavascriptInterface
-fun onHtmlMarkerStateChanged(stateJson: String) = notifyHtmlMarkerStateChanged(stateJson)
+fun onHtmlMarkerStateChanged(stateJson: String) = emit(BridgeEvent.HtmlMarkerStateChanged(stateJson))
 ```
 
-`@JavascriptInterface` methods run on a WebView background thread: post to the main thread before touching UI state.
+`@JavascriptInterface` methods run on a WebView background thread: `emit` posts the event to the main thread before any UI state is touched. The feature screen then collects it:
+
+```kotlin
+// app/src/main/java/com/visioglobe/visioonemeet/features/HtmlOverlayMarker.kt
+OnBridgeEvent<BridgeEvent.HtmlMarkerStateChanged>(map) { htmlMarkerState = parseHtmlMarkerStatePayload(it.stateJson) }
+```
 
 The SDK calls exercised:
 
