@@ -9,43 +9,64 @@ Points the SDK at a different map server than the Visioglobe SaaS default, via `
 `baseURL` is a `loadVenue` option, not a live property — it only takes effect when the venue is (re)loaded, so there is no `venue`/`view` setter to call on an already-loaded map. This demo re-navigates the WebView to re-run the whole load sequence with the new value:
 
 ```js
-// The Android app appends ?baseUrl=<value> when it loads this page — every
-// screen except this one omits it, so it always resolves to the SDK's own
-// real default.
+// web/src/features/custom-base-url.js — the Android app appends ?baseUrl=<value>
+// when it loads this page; every other screen sends the SDK's own default.
 const DEFAULT_BASE_URL = 'https://mapserver.visioglobe.com/';
-const baseURL = new URLSearchParams(window.location.search).get('baseUrl') || DEFAULT_BASE_URL;
 
-async function main() {
+export const baseURL = new URLSearchParams(window.location.search).get('baseUrl') || DEFAULT_BASE_URL;
+```
+```js
+// web/src/main.js — the value is passed to loadVenue
+async function loadAndShowVenue(loadOptions, loaderContainer) {
   try {
     const visioOne = createVisioOne();
-    venue = await visioOne.loadVenue({ vg_maphash: hash, baseURL });
-    view = await visioOne.createView(container, venue);
-    // ...
-    bridge?.onMapReady();
+    setVenue(await visioOne.loadVenue(loadOptions, loaderContainer));
+    // ... createView
+    notify('onMapReady');
   } catch (error) {
-    bridge?.onMapError(String(error?.message ?? error));
+    // ...
+    notify('onMapError', String(error?.message ?? error));
   }
+}
+
+function main() {
+  // ... (auth-token's protected map aside)
+  return loadAndShowVenue({ vg_maphash: hash, baseURL });
 }
 ```
 
-Native call site — the "Reload" button doesn't call anything on an existing venue/view; it hands `FeatureMapScreen` a new value, which forces the WebView to be recreated from scratch against a new `?baseUrl=` query param:
+Native call site — the "Reload" button doesn't call anything on an existing venue/view; it sets a new `baseUrl` on the screen's map state, which forces the WebView to be recreated from scratch against a new `?baseUrl=` query param:
 
 ```kotlin
-key(mapHash, currentBaseUrl) {
+// app/src/main/java/com/visioglobe/visioonemeet/features/CustomBaseUrl.kt
+Button(onClick = { map.reloadWithBaseUrl(baseUrl.trim()) }, enabled = baseUrl.isNotBlank()) { /* ... */ }
+```
+```kotlin
+// app/src/main/java/com/visioglobe/visioonemeet/bridge/MapWebView.kt
+fun pageUrl(): String {
+    val query = if (isProtected) {
+        "?protected=true"
+    } else {
+        "?vg_maphash=$mapHash&baseUrl=${URLEncoder.encode(baseUrl, "UTF-8")}" + /* ... */
+    }
+    return "https://$ASSET_LOADER_DOMAIN/assets/www/index.html$query"
+}
+```
+```kotlin
+// app/src/main/java/com/visioglobe/visioonemeet/ui/FeatureMapScreen.kt
+val pageOptions = MapPageOptions(mapHash = mapHash, baseUrl = map.baseUrl, /* ... */)
+key(pageOptions, protectedMap) {
     AndroidView(
         factory = { context ->
             // ...
-            val encodedBaseUrl = URLEncoder.encode(currentBaseUrl, "UTF-8")
-            loadUrl(
-                "https://$ASSET_LOADER_DOMAIN/assets/www/index.html" +
-                    "?vg_maphash=$mapHash&baseUrl=$encodedBaseUrl",
-            )
-        }.also { webView = it }
+            createMapWebView(context, pageOptions, bridge).also { map.webView = it }
+        },
+        onRelease = { it.destroy() },
     )
 }
 ```
 
-Changing `currentBaseUrl` gives the `key()` block a new identity, so Compose disposes the old `WebView` and runs `factory` again — the same "recreate everything" idiom every feature screen already uses on first entry, just re-triggered on demand.
+Changing `baseUrl` gives the `key()` block a new identity, so Compose disposes the old `WebView` and runs `factory` again — the same "recreate everything" idiom every feature screen already uses on first entry, just re-triggered on demand.
 
 ## Things to know
 

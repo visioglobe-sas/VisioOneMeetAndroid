@@ -13,8 +13,10 @@ Loads a map protected by an authorization token: the map is served by Visioglobe
 The sample lives in:
 
 - `app/src/main/java/com/visioglobe/visioonemeet/sample/ProtectedMapSample.kt` — the placeholders, a `ProtectedMapScreen` composable, the refresh entry point;
-- `web/src/main.js` — `loadProtectedVenue`, `isUnauthorizedError`, `MapBridge.setAuthorizationToken`;
-- `app/src/main/java/com/visioglobe/visioonemeet/ui/FeatureMapScreen.kt` — the two bridge methods (`getProtectedMapOptions`, `onAuthorizationError`).
+- `web/src/features/auth-token.js` — `isProtectedMap`, `protectedLoadOptions`, `isUnauthorizedError`, `MapBridge.setAuthorizationToken`;
+- `web/src/main.js` — `loadAndShowVenue`, which loads the venue with those options and reports an `UnauthorizedError` apart from other load errors;
+- `app/src/main/java/com/visioglobe/visioonemeet/bridge/NativeBridge.kt` — the two bridge methods (`getProtectedMapOptions`, `onAuthorizationError`);
+- `app/src/main/java/com/visioglobe/visioonemeet/bridge/MapWebView.kt` — the `?protected=true` page URL and the asset loader domain.
 
 ## SDK usage
 
@@ -23,6 +25,7 @@ The sample lives in:
 The placeholders, defined once where you configure the app:
 
 ```kotlin
+// app/src/main/java/com/visioglobe/visioonemeet/sample/ProtectedMapSample.kt
 const val PROTECTED_MAP_HASH = "YOUR_PROTECTED_MAP_HASH"
 const val PROTECTED_MAP_BASE_URL = "https://mapserver-auth.visioglobe.com/"
 // Issued by YOUR OWN backend (Visioglobe provides the signing secret and the claims to use).
@@ -41,28 +44,32 @@ data class ProtectedMapOptions(val mapHash: String, val baseUrl: String, val aut
 The page is loaded with `index.html?protected=true` — **no** `vg_maphash` in the URL, because the SDK lets a URL `vg_maphash` override the one in `LoadOptions`. The page then pulls the options synchronously from the object exposed with `addJavascriptInterface(..., "AndroidBridge")`:
 
 ```kotlin
+// app/src/main/java/com/visioglobe/visioonemeet/bridge/NativeBridge.kt
 @JavascriptInterface
 fun getProtectedMapOptions(): String = protectedMapOptionsJson ?: "{}"
 
 @JavascriptInterface
-fun onAuthorizationError(message: String) = onAuthorizationError.invoke(message)
+fun onAuthorizationError(message: String) {
+    mainHandler.post { onLoadFailed(message, true) }
+}
 ```
 
 Token refresh entry point — call it with a fresh token before the current one expires:
 
 ```kotlin
-fun WebView.refreshAuthorizationToken(freshToken: String) {
-    evaluateJavascript("window.MapBridge.setAuthorizationToken(${JSONObject.quote(freshToken)})", null)
-}
+// app/src/main/java/com/visioglobe/visioonemeet/sample/ProtectedMapSample.kt
+fun WebView.refreshAuthorizationToken(freshToken: String) = callBridge("setAuthorizationToken", freshToken)
 ```
 
 `ProtectedMapScreen` does it on a timer while the map is shown, with a placeholder `fetchTokenFromYourBackend()` you replace with a call to your backend:
 
 ```kotlin
-LaunchedEffect(webView, isMapReady) {
-    if (webView == null || !isMapReady) return@LaunchedEffect
+private val TOKEN_REFRESH_INTERVAL: Duration = 45.minutes
+
+LaunchedEffect(webView, map.isMapReady) {
+    if (webView == null || !map.isMapReady) return@LaunchedEffect
     while (true) {
-        delay(45.minutes)
+        delay(TOKEN_REFRESH_INTERVAL)
         webView.refreshAuthorizationToken(fetchTokenFromYourBackend())
     }
 }
@@ -71,42 +78,53 @@ LaunchedEffect(webView, isMapReady) {
 ### JS side (the page)
 
 ```js
-import { createVisioOne } from '@visioglobe/visioone';
+// web/src/features/auth-token.js
+export const isProtectedMap = new URLSearchParams(window.location.search).get('protected') === 'true';
 
-function loadProtectedVenue({ vg_maphash, baseURL, authorizationToken }) {
-  return loadAndShowVenue({ vg_maphash, baseURL, authorizationToken }, container);
+// Pulled synchronously from the native side: { vg_maphash, baseURL, authorizationToken }.
+export function protectedLoadOptions() {
+  const { vg_maphash, baseURL, authorizationToken } = JSON.parse(bridge.getProtectedMapOptions());
+  return { vg_maphash, baseURL, authorizationToken };
 }
 
-async function loadAndShowVenue(loadOptions, loaderContainer) {
-  try {
-    const visioOne = createVisioOne();
-    venue = await visioOne.loadVenue(loadOptions, loaderContainer);
-    view = await visioOne.createView(container, venue);
-    // ...
-    bridge?.onMapReady();
-  } catch (error) {
-    if (isUnauthorizedError(error)) {
-      bridge?.onAuthorizationError(String(error?.message ?? error)); // token invalid, expired or missing
-    } else {
-      bridge?.onMapError(String(error?.message ?? error));
-    }
-  }
-}
-
-// On page start, in protected mode:
-loadProtectedVenue(JSON.parse(window.AndroidBridge.getProtectedMapOptions()));
-
-window.MapBridge = {
+export const mapBridge = {
   setAuthorizationToken(freshToken) {
     if (venue) venue.setAuthorizationToken(freshToken);
   },
 };
 ```
 
+```js
+// web/src/main.js
+async function loadAndShowVenue(loadOptions, loaderContainer) {
+  try {
+    const visioOne = createVisioOne();
+    setVenue(await visioOne.loadVenue(loadOptions, loaderContainer));
+    // ... createView, view listeners
+    notify('onMapReady');
+  } catch (error) {
+    if (authToken.isUnauthorizedError(error)) {
+      // token invalid, expired or missing
+      notify('onAuthorizationError', String(error?.message ?? error));
+    } else {
+      notify('onMapError', String(error?.message ?? error));
+    }
+  }
+}
+
+function main() {
+  if (authToken.isProtectedMap) {
+    return loadAndShowVenue(authToken.protectedLoadOptions(), container);
+  }
+  return loadAndShowVenue({ vg_maphash: hash, baseURL });
+}
+```
+
 Recognizing the error:
 
 ```js
-function isUnauthorizedError(error) {
+// web/src/features/auth-token.js
+export function isUnauthorizedError(error) {
   return (
     error?.constructor?.name === 'UnauthorizedError' ||
     /authorization token/i.test(String(error?.message ?? ''))
@@ -121,7 +139,7 @@ function isUnauthorizedError(error) {
 - **Never embed the JWT signing secret in the app or the page.** Your backend signs the tokens (Visioglobe provides the secret and the claims to use); the app only receives ready-made tokens.
 - **Tokens are short-lived** — the protected server accepts a lifetime of at most 1 hour. Requests made after expiry are rejected. Call `venue.setAuthorizationToken(freshToken)` before expiry: it applies to every subsequent request, no reload needed. Refreshing in time is your app's job; the SDK does not do it for you.
 - **`UnauthorizedError` cannot be caught with `instanceof`.** SDK 1.1.0 declares the class in its typings but does not export it from the package entry (only `createVisioOne`/`VisioOne`), and it does not set `error.name` (it stays `"Error"`). Identify it by `error.constructor.name === 'UnauthorizedError'` (preserved by this repo's Vite build — check yours if your bundler renames classes) or by its message, `"This venue needs an Authorization token to be loaded"`. The SDK raises it when the server answers **403** to the map's `descriptor.json`.
-- **The page origin must be allowlisted (CORS).** The protected server checks the request's `Origin` against a list Visioglobe configures for your account. In this app the page is served by `WebViewAssetLoader`, so its origin is **`https://appassets.androidx.local`** (the domain set in `FeatureMapScreen.kt`) — tell Visioglobe the origin(s) your app uses.
+- **The page origin must be allowlisted (CORS).** The protected server checks the request's `Origin` against a list Visioglobe configures for your account. In this app the page is served by `WebViewAssetLoader`, so its origin is **`https://appassets.androidx.local`** (the domain set in `bridge/MapWebView.kt`) — tell Visioglobe the origin(s) your app uses.
 - **A rejected origin looks like a generic error, not `UnauthorizedError`.** The `Authorization` header makes the browser send a CORS preflight (`OPTIONS`) first. If the origin is not allowlisted, the preflight is refused (observed: `403` with no `Access-Control-Allow-Origin`), the SDK logs `VisioOne error: TypeError: Failed to fetch` and `loadVenue` rejects with a plain `Error('Cannot load the venue')`. That is exactly what this sample returns with its placeholder values from `https://appassets.androidx.local`. Only once the origin is accepted does a bad token surface as `UnauthorizedError`.
 
 ## Learn more

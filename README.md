@@ -34,7 +34,7 @@ The [Custom Data](docs/features/custom-data.md) screen is the one exception: it 
 
 ### Update the web bundle
 
-The web bundle (`app/src/main/assets/www/`) is checked into the repo, not generated at Android build time — Gradle never rebuilds it for you. Rebuild it manually whenever you change `web/src/main.js` or bump the SDK version in `web/package.json`:
+The web bundle (`app/src/main/assets/www/`) is checked into the repo, not generated at Android build time — Gradle never rebuilds it for you. Rebuild it manually whenever you change anything under `web/src/` or bump the SDK version in `web/package.json`:
 
 ```bash
 cd web
@@ -83,33 +83,51 @@ The VisioOne SDK is bundled once with Vite (`web/`), and the build output is cop
 
 The app and the page talk over two channels:
 
-- **Native → JS**: Kotlin calls `window.MapBridge.<command>(...)` through `WebView.evaluateJavascript()`. Every argument is JSON-encoded with `org.json` (`JSONObject.quote`, `JSONObject`, `JSONArray`) before being put in the script — never raw string concatenation, which would allow JS injection. `window.MapBridge` (in `web/src/main.js`) holds one method per command, each calling the real SDK on the page's `venue`/`view`.
-- **JS → native**: the page calls `window.AndroidBridge.<callback>(...)`, an object registered with `WebView.addJavascriptInterface()` (class `MapBridge` in `FeatureMapScreen.kt`): `onMapReady`/`onMapError` drive the loading and error overlay, and one callback per feature reports results and SDK events (`onPoiClick`, `onNavigationError`, `onCustomDataLoaded`, ...). These callbacks run on a WebView background thread, so each one posts its update to the main thread. Arguments are strings and numbers only: structured payloads are sent as JSON strings and parsed on the Kotlin side.
+- **Native → JS**: Kotlin calls `window.MapBridge.<command>(...)` through `WebView.evaluateJavascript()`, always via one helper, `WebView.callBridge(method, args...)` (`bridge/CallBridge.kt`). It JSON-encodes every argument with `org.json` (`JSONObject.quote`, `JSONObject`, `JSONArray`) before putting it in the script — never raw string concatenation, which would allow JS injection. `window.MapBridge` is assembled by `web/src/main.js` from the commands each `web/src/features/<slug>.js` exports, each calling the real SDK on the page's `venue`/`view`.
+- **JS → native**: the page calls `window.AndroidBridge.<callback>(...)` (`notify(...)` in `web/src/bridge.js`), an object registered with `WebView.addJavascriptInterface()` (class `NativeBridge` in `bridge/NativeBridge.kt`): `onMapReady`/`onMapError` drive the loading and error overlay, and one callback per feature reports results and SDK events (`onPoiClick`, `onNavigationError`, `onCustomDataLoaded`, ...). These callbacks run on a WebView background thread; each one is posted to the main thread as a typed `BridgeEvent` (`bridge/BridgeEvents.kt`), which the feature screens collect. Arguments are strings, numbers and booleans only: structured payloads are sent as JSON strings and parsed on the Kotlin side, by the feature that uses them.
 - A command whose result comes back asynchronously passes a `requestId` that the callback echoes, so a stale response is never mistaken for the current one.
-
-Where a feature's code lives:
-
-- the JS side: its `window.MapBridge` methods in `web/src/main.js` (after a change, rebuild the bundle, see Setup);
-- the native side: `ui/FeatureOverlays.kt` holds, per feature, the `WebView.xxx()` bridge wrappers, the result parsers, the screen-level state and the control shown in the bottom sheet;
-- `ui/FeatureMapScreen.kt` hosts the WebView, receives the `AndroidBridge` callbacks and shows the loading/error state; `MainActivity.kt` maps each menu entry to its screen.
 
 Per-feature state (field values, the object placed on the map, a running simulation) is kept at screen level, outside the bottom sheet, which is disposed every time it closes: reopening the panel always shows the map's current state.
 
 If you enable code shrinking (`isMinifyEnabled = true`), keep the `@JavascriptInterface` methods, e.g. `-keepclassmembers class * { @android.webkit.JavascriptInterface <methods>; }` in `proguard-rules.pro`.
+
+## Where is the code of feature X?
+
+In two files named after the feature's slug, one per side — `docs/features/goto-poi.md` documents:
+
+- `app/src/main/java/com/visioglobe/visioonemeet/features/GoToPoi.kt` — the native side: its `WebView.xxx()` bridge calls, the parsing of its results, its screen-level state, its screen (`GoToPoiScreen`) and the panel shown in the bottom sheet;
+- `web/src/features/goto-poi.js` — the JS side: its `window.MapBridge` commands, its view listeners and its own state, calling the SDK.
+
+The Kotlin file name is the slug in PascalCase (`3d-icon-marker` is `IconMarker3d.kt`). A few features reuse another feature's code rather than repeat it, and say so at the top of their file:
+
+- the tracked-position simulation (session, loop, Start/Stop panel) lives in `SimulatedPosition.kt` and is reused by `camera-lock-on-position`, `geofencing` and `accuracy-circle-style`;
+- the route itself is `compute-navigation`'s (`ComputeNavigation.kt`, `compute-navigation.js`), reused by `custom-navigation-trace`, `navigation-exclude-modalities` and `accessible-mode` (which has no JS of its own);
+- `native-ui-replacement` reuses `ui-part-visibility`'s and `floor-selector`'s calls, `add-locale` reuses `runtime-locale`'s `setLocale`, and `3d-icon-marker`, `custom-text-label` and `html-overlay-marker` reuse `goto-poi`'s;
+- `custom-base-url` has no command: it only sets a load option (`web/src/features/custom-base-url.js`), and the screen reloads the map.
 
 ## Repo structure
 
 ```
 app/                                   Android project (Compose)
   src/main/java/com/visioglobe/visioonemeet/
-    MainActivity.kt                    Navigation: feature menu -> one map screen per feature
+    MainActivity.kt                    Navigation: feature menu -> one screen per feature
     model/DemoMap.kt                   Map hash and demo POI ids (replace with your own)
     model/Feature.kt                   Feature menu registry
-    ui/FeatureMapScreen.kt             WebView host, JS -> native bridge, loading/error state
-    ui/FeatureOverlays.kt              Per-feature bridge calls, state and controls
+    features/<Feature>.kt              One file per feature (see above)
+    features/FeatureScreens.kt         Feature -> its screen
+    bridge/MapWebView.kt               WebView, WebViewAssetLoader, page URL and load options
+    bridge/NativeBridge.kt             JS -> native: the @JavascriptInterface callbacks
+    bridge/BridgeEvents.kt             One event per callback, collected by the feature screens
+    bridge/CallBridge.kt               Native -> JS: callBridge() and its argument encoding
+    ui/FeatureMapScreen.kt             Screen shell: top bar, map, loading/error, FAB, bottom sheet
+    ui/FeatureMenuScreen.kt            Feature menu
+    ui/components/                     Shared controls: itinerary form, option buttons, color chip
     sample/ProtectedMapSample.kt       auth-token code sample
   src/main/assets/www/                 Generated web bundle (see web/), served by the WebView
 web/                                   Small Vite project that imports @visioglobe/visioone
-  src/main.js                          The page: map loading and every window.MapBridge command
+  src/main.js                          Loads the venue, creates the view, assembles window.MapBridge
+  src/features/<slug>.js               One module per feature (see above)
+  src/bridge.js, src/context.js        notify() to native; the page's live venue/view
+  src/shared/                          POI position and point-in-polygon helpers
 docs/features/                         Per-feature SDK reference docs (see Features above)
 ```

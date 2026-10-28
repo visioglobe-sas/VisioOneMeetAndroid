@@ -14,11 +14,16 @@ The SDK public API (as of 1.1.0) has no option to change the UI font.
 ## SDK usage
 
 ```js
-// web/src/main.js
+// web/src/features/custom-theme.js
 
 // The Android app appends ?enableShadows=true to this page's URL on the
 // custom-theme screen only.
 const enableShadows = new URLSearchParams(window.location.search).get('enableShadows') === 'true';
+
+// This feature's createView options (merged by main.js into createView's options).
+export function viewOptions() {
+  return enableShadows ? { enableShadows: true } : {};
+}
 
 const DEFAULT_THEME = 'day';
 const DEFAULT_ACCENT_COLOR = '#0094F0';
@@ -27,25 +32,20 @@ let currentTheme = DEFAULT_THEME; // no getter in the SDK: track it yourself
 
 // Reports the whole state to native after every command.
 function reportThemeState(status, extra) {
-  bridge?.onThemeStateChanged(JSON.stringify({
-    status,
-    themes: view?.themes ?? [],
-    currentTheme,
-    accentColor: String(view?.accentColor ?? DEFAULT_ACCENT_COLOR),
-    textAccentColor: String(view?.textAccentColor ?? DEFAULT_TEXT_ACCENT_COLOR),
-    ...extra,
-  }));
+  notify(
+    'onThemeStateChanged',
+    JSON.stringify({
+      status,
+      themes: view?.themes ?? [],
+      currentTheme,
+      accentColor: String(view?.accentColor ?? DEFAULT_ACCENT_COLOR),
+      textAccentColor: String(view?.textAccentColor ?? DEFAULT_TEXT_ACCENT_COLOR),
+      ...extra,
+    }),
+  );
 }
 
-async function main() {
-  const visioOne = createVisioOne();
-  venue = await visioOne.loadVenue({ vg_maphash: hash, baseURL });
-  view = await visioOne.createView(container, venue, enableShadows ? { enableShadows: true } : undefined);
-  // ...
-}
-
-window.MapBridge = {
-  // ...
+export const mapBridge = {
   getThemeState() {
     if (!view) return;
     reportThemeState('loaded');
@@ -93,43 +93,37 @@ window.MapBridge = {
 };
 ```
 
-Native side — the page URL carries the creation option, and each command is a one-line script call (string arguments are JSON-quoted before being interpolated into the script):
+Native side — the page URL carries the creation option, and each command is a one-line `callBridge` call (it JSON-encodes each argument — the string arguments are quoted with `JSONObject.quote()` — before interpolating it into the script):
 
 ```kotlin
-// Loading the bridge page with shadows/lights enabled
-webView.loadUrl(
-    "https://appassets.androidx.local/assets/www/index.html" +
-        "?vg_maphash=$mapHash&enableShadows=true",
-)
+// app/src/main/java/com/visioglobe/visioonemeet/bridge/MapWebView.kt — MapPageOptions.pageUrl()
+"?vg_maphash=$mapHash&baseUrl=${URLEncoder.encode(baseUrl, "UTF-8")}" +
+    (if (enableShadows) "&enableShadows=true" else "") + /* ... */
 
-// app/src/main/java/com/visioglobe/visioonemeet/ui/FeatureOverlays.kt — native bridge wrappers
-private fun WebView.getThemeState() {
-    evaluateJavascript("window.MapBridge.getThemeState()", null)
-}
+// app/src/main/java/com/visioglobe/visioonemeet/features/CustomTheme.kt
+FeatureMapScreen(map, Feature.CustomTheme, onBack, enableShadows = true) { /* ... */ }
 
-private fun WebView.setTheme(themeName: String) {
-    evaluateJavascript("window.MapBridge.setTheme(${JSONObject.quote(themeName)})", null)
-}
+private fun WebView.getThemeState() = callBridge("getThemeState")
 
-private fun WebView.setAccentColor(color: String) {
-    evaluateJavascript("window.MapBridge.setAccentColor(${JSONObject.quote(color)})", null)
-}
+private fun WebView.setTheme(themeName: String) = callBridge("setTheme", themeName)
 
-private fun WebView.setTextAccentColor(color: String) {
-    evaluateJavascript("window.MapBridge.setTextAccentColor(${JSONObject.quote(color)})", null)
-}
+private fun WebView.setAccentColor(color: String) = callBridge("setAccentColor", color)
 
-private fun WebView.resetTheme() {
-    evaluateJavascript("window.MapBridge.resetTheme()", null)
-}
+private fun WebView.setTextAccentColor(color: String) = callBridge("setTextAccentColor", color)
+
+private fun WebView.resetTheme() = callBridge("resetTheme")
 ```
 
 Every outcome comes back through one bridge method, carrying a JSON snapshot such as `{"status":"theme-applied","themes":["day","night","goldenHour"],"currentTheme":"night","accentColor":"#E53935","textAccentColor":"#FFFFFF"}` — build your theme picker from `themes`, never from a hardcoded list:
 
 ```kotlin
-// FeatureMapScreen.kt — exposed as window.AndroidBridge via addJavascriptInterface
+// app/src/main/java/com/visioglobe/visioonemeet/bridge/NativeBridge.kt — exposed as window.AndroidBridge
 @JavascriptInterface
-fun onThemeStateChanged(stateJson: String) = notifyThemeStateChanged(stateJson)
+fun onThemeStateChanged(stateJson: String) = emit(BridgeEvent.ThemeStateChanged(stateJson))
+```
+```kotlin
+// app/src/main/java/com/visioglobe/visioonemeet/features/CustomTheme.kt
+OnBridgeEvent<BridgeEvent.ThemeStateChanged>(map) { themeState = parseThemeStatePayload(it.stateJson) }
 ```
 
 `@JavascriptInterface` methods run on a WebView background thread: post to the main thread before touching UI state.

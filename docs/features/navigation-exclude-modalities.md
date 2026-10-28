@@ -21,23 +21,24 @@ const navigation = venue.computeNavigation({
 Native call site and the JS side of the bridge:
 
 ```kotlin
+// app/src/main/java/com/visioglobe/visioonemeet/features/NavigationExcludeModalities.kt
 private fun WebView.computeNavigationExcludingModalities(
     origin: String,
     destination: String,
     isAccessible: Boolean,
     excludeElevator: Boolean,
-) {
-    val script = "window.MapBridge.computeNavigationExcludingModalities(" +
-        "${JSONObject.quote(origin)}, ${JSONObject.quote(destination)}, $isAccessible, $excludeElevator)"
-    evaluateJavascript(script, null)
-}
+) = callBridge("computeNavigationExcludingModalities", origin, destination, isAccessible, excludeElevator)
 ```
 
 ```js
-// window.MapBridge, JS side — drawNavigation() is shown in compute-navigation.md
-computeNavigationExcludingModalities(origin, destination, isAccessible, excludeElevator) {
-  drawNavigation({ origin, destination, isAccessible, excludedAttributes: excludeElevator ? ['lift'] : [] });
-},
+// web/src/features/navigation-exclude-modalities.js — drawNavigation() (web/src/features/compute-navigation.js) is shown in compute-navigation.md
+import { drawNavigation } from './compute-navigation.js';
+
+export const mapBridge = {
+  computeNavigationExcludingModalities(origin, destination, isAccessible, excludeElevator) {
+    drawNavigation({ origin, destination, isAccessible, excludedAttributes: excludeElevator ? ['lift'] : [] });
+  },
+};
 ```
 
 ## Things to know

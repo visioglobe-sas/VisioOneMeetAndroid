@@ -86,7 +86,7 @@
     <string name="carousel_hint">Touching the map pauses the tour; it resumes on its own after %1$d s.</string>
     <string name="feature_auth_token_title">Protected map (token)</string>
     <string name="feature_auth_token_description">Code sample: load a map protected by an authorization token</string>
-    <string name="auth_token_sample_text">This feature is a code sample only: this demo has no protected map to load. See app/src/main/java/com/visioglobe/visioonemeet/sample/ProtectedMapSample.kt, loadProtectedVenue in web/src/main.js and docs/features/auth-token.md, then replace the placeholder map hash and token with your own values.</string>
+    <string name="auth_token_sample_text">This feature is a code sample only: this demo has no protected map to load. See app/src/main/java/com/visioglobe/visioonemeet/sample/ProtectedMapSample.kt, web/src/features/auth-token.js and docs/features/auth-token.md, then replace the placeholder map hash and token with your own values.</string>
     <string name="auth_token_unauthorized_error">Authorization token invalid, expired or missing.</string>
     <!-- Default values of feature input fields (demo texts). -->
     <string name="dynamic_poi_default_label">Demo POI</string>

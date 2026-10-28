@@ -9,22 +9,24 @@ A switch, "Show SDK's own floor selector", starts off (SDK widget hidden, only t
 ## SDK usage
 
 ```js
-setUIPartVisible(uiPart, isVisible) {
-  if (!view) return;
-  view.setUIPartVisible(uiPart, isVisible);
-},
+// web/src/features/ui-part-visibility.js
+export const mapBridge = {
+  setUIPartVisible(uiPart, isVisible) {
+    if (!view) return;
+    view.setUIPartVisible(uiPart, isVisible);
+  },
+};
 ```
 
 Native call site (same bridge helper `ui-part-visibility` uses, `uiPart` fixed to `'floorSelector'` here):
 
 ```kotlin
-internal fun WebView.setUiPartVisible(uiPart: String, isVisible: Boolean) {
-    val script = "window.MapBridge.setUIPartVisible(${JSONObject.quote(uiPart)}, $isVisible)"
-    evaluateJavascript(script, null)
-}
+// app/src/main/java/com/visioglobe/visioonemeet/features/UiPartVisibility.kt
+internal fun WebView.setUiPartVisible(uiPart: String, isVisible: Boolean) =
+    callBridge("setUIPartVisible", uiPart, isVisible)
 ```
 
-Two call sites use it on this screen: once as soon as the map is ready (`webView.setUiPartVisible("floorSelector", false)`, before the visitor ever opens the FAB's sheet, so the SDK widget is never shown by default), and again on every flip of the switch (`webView.setUiPartVisible("floorSelector", isVisible)`).
+Two call sites use it on this screen (`features/NativeUiReplacement.kt`): once as soon as the map is ready (`webView.setUiPartVisible("floorSelector", false)`, before the visitor ever opens the FAB's sheet, so the SDK widget is never shown by default), and again on every flip of the switch (`webView.setUiPartVisible("floorSelector", isVisible)`).
 
 The floor picker itself is `floor-selector`'s existing native list — `view.goToFloor(floor)`, kept in sync with `currentfloorchanged` — reused verbatim here rather than reimplemented; see that doc's "SDK usage" section for its call sites.
 

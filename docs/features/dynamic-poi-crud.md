@@ -9,12 +9,12 @@ A bare `venue.createPOI()` has no visual representation of its own, so this demo
 ## SDK usage
 
 ```js
-// web/src/main.js
+// web/src/shared/poi.js
 
 // POIs carry no direct lat/lng field. One helper gives a POI's display position:
 // its first label's position, else its first image's or marker's, else the
 // centroid of its first surface's outline. `excluded` skips our own objects.
-function poiDisplayPosition(poi, excluded = []) {
+export function poiDisplayPosition(poi, excluded = []) {
   const first = (items) => items?.find((item) => !excluded.includes(item))?.position;
   const position = first(poi.labels) ?? first(poi.images) ?? first(poi.markers);
   if (position) return position;
@@ -25,85 +25,87 @@ function poiDisplayPosition(poi, excluded = []) {
     longitude: vertices.reduce((sum, p) => sum + p.longitude, 0) / vertices.length,
   };
 }
+```
+
+```js
+// web/src/features/dynamic-poi-crud.js
 
 // The POI/Label pair created at runtime, tracked so updateDynamicPoiLabel/
 // removeDynamicPoi know what to act on. Only one dynamic POI at a time.
 let dynamicPoi = null;
 let dynamicLabel = null;
 
-createDynamicPoi(requestId, newId, anchorId, labelText) {
-  if (!venue) return;
-  const report = (status, extra) => {
-    bridge?.onDynamicPoiCreated(requestId, JSON.stringify({ status, ...extra }));
-  };
-  const anchor = venue.pois.find((p) => p.id === anchorId);
-  if (!anchor) {
-    report('anchor-not-found');
-    return;
-  }
-  const anchorPosition = poiDisplayPosition(anchor);
-  if (!anchorPosition) {
-    report('anchor-has-no-position');
-    return;
-  }
-  try {
-    const poi = venue.createPOI({ id: newId });
-    const label = venue.createLabel({ poi, position: anchorPosition, width: 2, text: labelText });
-    dynamicPoi = poi;
-    dynamicLabel = label;
-    report('created', { id: poi.id, text: label.text });
-  } catch (error) {
-    if (error?.constructor?.name === 'POIAlreadyExistsError') {
-      report('duplicate-id');
-    } else {
-      report('error', { message: String(error?.message ?? error) });
+export const mapBridge = {
+  createDynamicPoi(requestId, newId, anchorId, labelText) {
+    if (!venue) return;
+    const report = (status, extra) => {
+      notify('onDynamicPoiCreated', requestId, JSON.stringify({ status, ...extra }));
+    };
+    const anchor = findPoi(anchorId); // venue.pois.find((p) => p.id === anchorId)
+    if (!anchor) {
+      report('anchor-not-found');
+      return;
     }
-  }
-},
+    const anchorPosition = poiDisplayPosition(anchor);
+    if (!anchorPosition) {
+      report('anchor-has-no-position');
+      return;
+    }
+    try {
+      const poi = venue.createPOI({ id: newId });
+      const label = venue.createLabel({ poi, position: anchorPosition, width: 2, text: labelText });
+      dynamicPoi = poi;
+      dynamicLabel = label;
+      report('created', { id: poi.id, text: label.text });
+    } catch (error) {
+      if (error?.constructor?.name === 'POIAlreadyExistsError') {
+        report('duplicate-id');
+      } else {
+        report('error', { message: String(error?.message ?? error) });
+      }
+    }
+  },
 
-// The real "modify" story for a dynamic POI: venue.updatePOI itself can only
-// touch categories, never anything visual.
-updateDynamicPoiLabel(text) {
-  if (!venue || !dynamicLabel) return;
-  venue.updateLabel(dynamicLabel, { text });
-},
+  // The real "modify" story for a dynamic POI: venue.updatePOI itself can only
+  // touch categories, never anything visual.
+  updateDynamicPoiLabel(text) {
+    if (!venue || !dynamicLabel) return;
+    venue.updateLabel(dynamicLabel, { text });
+  },
 
-// venue.removePOI cascades: it removes the attached label from the view too.
-removeDynamicPoi() {
-  if (!venue || !dynamicPoi) return;
-  venue.removePOI(dynamicPoi);
-  dynamicPoi = null;
-  dynamicLabel = null;
-},
+  // venue.removePOI cascades: it removes the attached label from the view too.
+  removeDynamicPoi() {
+    if (!venue || !dynamicPoi) return;
+    venue.removePOI(dynamicPoi);
+    dynamicPoi = null;
+    dynamicLabel = null;
+  },
+};
 ```
 
-Native call sites:
+Native call sites (`callBridge` JSON-encodes each argument, the strings with `JSONObject.quote()`):
 
 ```kotlin
-// app/src/main/java/com/visioglobe/visioonemeet/ui/FeatureOverlays.kt — native bridge wrappers
-private fun WebView.createDynamicPoi(requestId: Int, newId: String, anchorId: String, labelText: String) {
-    val script = "window.MapBridge.createDynamicPoi(" +
-        "$requestId, ${JSONObject.quote(newId)}, ${JSONObject.quote(anchorId)}, ${JSONObject.quote(labelText)})"
-    evaluateJavascript(script, null)
-}
+// app/src/main/java/com/visioglobe/visioonemeet/features/DynamicPoiCrud.kt
+private fun WebView.createDynamicPoi(requestId: Int, newId: String, anchorId: String, labelText: String) =
+    callBridge("createDynamicPoi", requestId, newId, anchorId, labelText)
 
-private fun WebView.updateDynamicPoiLabel(text: String) {
-    val script = "window.MapBridge.updateDynamicPoiLabel(${JSONObject.quote(text)})"
-    evaluateJavascript(script, null)
-}
+private fun WebView.updateDynamicPoiLabel(text: String) = callBridge("updateDynamicPoiLabel", text)
 
-private fun WebView.removeDynamicPoi() {
-    evaluateJavascript("window.MapBridge.removeDynamicPoi()", null)
-}
+private fun WebView.removeDynamicPoi() = callBridge("removeDynamicPoi")
 ```
 
 `createDynamicPoi`'s result comes back asynchronously on the native side, echoing `requestId`, same convention as `custom-data.md`'s `loadCustomData`/`category-highlight.md`'s `getCategories`:
 
 ```kotlin
-// FeatureMapScreen.kt
+// app/src/main/java/com/visioglobe/visioonemeet/bridge/NativeBridge.kt
 @JavascriptInterface
 fun onDynamicPoiCreated(requestId: Int, resultJson: String) =
-    notifyDynamicPoiCreated(requestId, resultJson)
+    emit(BridgeEvent.DynamicPoiCreated(requestId, resultJson))
+```
+```kotlin
+// app/src/main/java/com/visioglobe/visioonemeet/features/DynamicPoiCrud.kt
+OnBridgeEvent<BridgeEvent.DynamicPoiCreated>(map) { session.onCreated(it) }
 ```
 
 The SDK calls exercised:

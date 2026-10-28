@@ -7,58 +7,55 @@ Switches the map's displayed language at runtime — POI/label names, and any on
 ## SDK usage
 
 ```js
-// web/src/main.js
-
-// Reports the venue's currentLocale back to native in one round trip, so the
-// runtime-locale sheet can highlight whichever option is already active when
-// it opens. There is no locale-change event to listen for instead, so this
-// is called every time the panel opens. Reuses the
-// { status, locale } response shape of setLocale below so native can share
-// one response parser for both.
-getCurrentLocale(requestId) {
-  if (!venue) return;
-  bridge?.onLocaleResolved(requestId, JSON.stringify({ status: 'ok', locale: venue.currentLocale }));
-},
-
-// Switches the map's displayed language via venue.setCurrentLocale, which
-// re-renders POI/label names (and the current View's UI/Navigation) with the
-// new locale by itself — no manual re-fetch of POI data needed.
-async setLocale(requestId, locale) {
-  if (!venue) return;
-  try {
-    await venue.setCurrentLocale(locale);
-    bridge?.onLocaleResolved(requestId, JSON.stringify({ status: 'ok', locale: venue.currentLocale }));
-  } catch (error) {
-    bridge?.onLocaleResolved(
-      requestId,
-      JSON.stringify({ status: 'error', message: String(error?.message ?? error) }),
-    );
-  }
-},
+// web/src/features/runtime-locale.js
+export const mapBridge = {
+  // Reports the venue's currentLocale back to native in one round trip, so the
+  // runtime-locale sheet can highlight whichever option is already active when
+  // it opens. There is no locale-change event to listen for instead, so it is
+  // called every time the panel opens. Reuses the { status, locale } response
+  // shape of setLocale below so native can share one response parser for both.
+  getCurrentLocale(requestId) {
+    if (!venue) return;
+    notify('onLocaleResolved', requestId, JSON.stringify({ status: 'ok', locale: venue.currentLocale }));
+  },
+  // Switches the map's displayed language via venue.setCurrentLocale, which
+  // re-renders POI/label names (and the current View's UI/Navigation) with the
+  // new locale by itself — no manual re-fetch of POI data needed.
+  async setLocale(requestId, locale) {
+    if (!venue) return;
+    try {
+      await venue.setCurrentLocale(locale);
+      notify('onLocaleResolved', requestId, JSON.stringify({ status: 'ok', locale: venue.currentLocale }));
+    } catch (error) {
+      notify(
+        'onLocaleResolved',
+        requestId,
+        JSON.stringify({ status: 'error', message: String(error?.message ?? error) }),
+      );
+    }
+  },
+};
 ```
 
-Native call sites:
+Native call sites (`callBridge` JSON-encodes each argument: the `requestId` number as is, the locale string with `JSONObject.quote`):
 
 ```kotlin
-// app/src/main/java/com/visioglobe/visioonemeet/ui/FeatureOverlays.kt — native bridge wrappers
-private fun WebView.getCurrentLocale(requestId: Int) {
-    val script = "window.MapBridge.getCurrentLocale($requestId)"
-    evaluateJavascript(script, null)
-}
+// app/src/main/java/com/visioglobe/visioonemeet/features/RuntimeLocale.kt
+private fun WebView.getCurrentLocale(requestId: Int) = callBridge("getCurrentLocale", requestId)
 
-private fun WebView.setLocale(requestId: Int, locale: String) {
-    val script = "window.MapBridge.setLocale($requestId, ${JSONObject.quote(locale)})"
-    evaluateJavascript(script, null)
-}
+internal fun WebView.setLocale(requestId: Int, locale: String) = callBridge("setLocale", requestId, locale)
 ```
 
 Both calls' results come back asynchronously on the native side through the same callback, echoing `requestId`, same convention as `custom-data.md`'s `loadCustomData`:
 
 ```kotlin
-// FeatureMapScreen.kt
+// app/src/main/java/com/visioglobe/visioonemeet/bridge/NativeBridge.kt — exposed as window.AndroidBridge
 @JavascriptInterface
-fun onLocaleResolved(requestId: Int, resultJson: String) =
-    notifyLocaleResolved(requestId, resultJson)
+fun onLocaleResolved(requestId: Int, resultJson: String) = emit(BridgeEvent.LocaleResolved(requestId, resultJson))
+```
+```kotlin
+// app/src/main/java/com/visioglobe/visioonemeet/features/RuntimeLocale.kt
+OnBridgeEvent<BridgeEvent.LocaleResolved>(map) { session.onLocaleResolved(it) }
 ```
 
 `venue.currentLocale: string` (readonly) is the property read; `venue.setCurrentLocale(locale: string): Promise<void>` is the only mutating call. Available locales for a venue can be read from `venue.translator.allLocales: string[]`.

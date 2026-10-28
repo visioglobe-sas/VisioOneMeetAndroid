@@ -20,15 +20,13 @@ const navigation = venue.computeNavigation({
 Native call site — no new bridge method needed, `computeNavigation` already threads `isAccessible` end-to-end (also used, hardcoded `false`, by [Compute Navigation](compute-navigation.md) and [Custom Navigation Trace](custom-navigation-trace.md)):
 
 ```kotlin
-private fun WebView.computeNavigation(origin: String, destination: String, isAccessible: Boolean) {
-    val script = "window.MapBridge.computeNavigation(" +
-        "${JSONObject.quote(origin)}, ${JSONObject.quote(destination)}, $isAccessible)"
-    evaluateJavascript(script, null)
-}
+// app/src/main/java/com/visioglobe/visioonemeet/features/ComputeNavigation.kt
+internal fun WebView.computeNavigation(origin: String, destination: String, isAccessible: Boolean) =
+    callBridge("computeNavigation", origin, destination, isAccessible)
 ```
 
 ```js
-// window.MapBridge, JS side — drawNavigation() is shown in compute-navigation.md
+// web/src/features/compute-navigation.js (mapBridge) — drawNavigation() is shown in compute-navigation.md
 computeNavigation(origin, destination, isAccessible) {
   drawNavigation({ origin, destination, isAccessible });
 },

@@ -7,45 +7,10 @@ Highlights every POI belonging to a chosen category (e.g. all restaurants, all s
 ## SDK usage
 
 ```js
-// web/src/main.js
-
-// Sends the venue's full category list back to native. Category is
-// `{ readonly id: string }` — a raw internal identifier (a numeric string
-// on this app's shared demo map, e.g. "1".."11"), not itself human-readable.
-// The display name comes from venue.translator.translateCategory(), same
-// Translator lookup already used for POI/floor names elsewhere in this file.
-getCategories(requestId) {
-  if (!venue) return;
-  const locale = venue.currentLocale;
-  const categories = venue.categories.map((category) => ({
-    id: category.id,
-    label: venue.translator.translateCategory(category, locale).name || category.id,
-  }));
-  bridge?.onCategoriesLoaded(requestId, JSON.stringify(categories));
-},
-
-// Highlights every POI belonging to categoryId. Reverts any previously
-// highlighted category first, so at most one category is highlighted at a
-// time.
-highlightCategory(categoryId) {
-  if (!venue) return;
-  clearHighlightedCategory();
-  venue.pois
-    .filter((poi) => poi.categories.some((category) => category.id === categoryId))
-    .forEach((poi) => {
-      poi.surfaces.forEach((surface) => {
-        venue.updateSurface(surface, { color: CATEGORY_HIGHLIGHT_COLOR });
-      });
-    });
-  highlightedCategoryId = categoryId;
-},
-
-clearCategoryHighlight() {
-  clearHighlightedCategory();
-},
+// web/src/features/category-highlight.js
 
 // Reverts the highlight applied by highlightCategory, if any (a plain function,
-// shared by both commands above).
+// shared by both highlight commands below).
 function clearHighlightedCategory() {
   if (!venue || !highlightedCategoryId) return;
   venue.pois
@@ -57,34 +22,63 @@ function clearHighlightedCategory() {
     });
   highlightedCategoryId = null;
 }
+
+export const mapBridge = {
+  // Sends the venue's full category list back to native. Category is
+  // `{ readonly id: string }` — a raw internal identifier (a numeric string
+  // on this app's shared demo map, e.g. "1".."11"), not itself human-readable.
+  // The display name comes from venue.translator.translateCategory(), same
+  // Translator lookup used for POI/floor names by other features.
+  getCategories(requestId) {
+    if (!venue) return;
+    const locale = venue.currentLocale;
+    const categories = venue.categories.map((category) => ({
+      id: category.id,
+      label: venue.translator.translateCategory(category, locale).name || category.id,
+    }));
+    notify('onCategoriesLoaded', requestId, JSON.stringify(categories));
+  },
+
+  // Highlights every POI belonging to categoryId. Reverts any previously
+  // highlighted category first, so at most one category is highlighted at a
+  // time.
+  highlightCategory(categoryId) {
+    if (!venue) return;
+    clearHighlightedCategory();
+    venue.pois
+      .filter((poi) => poi.categories.some((category) => category.id === categoryId))
+      .forEach((poi) => {
+        poi.surfaces.forEach((surface) => {
+          venue.updateSurface(surface, { color: CATEGORY_HIGHLIGHT_COLOR });
+        });
+      });
+    highlightedCategoryId = categoryId;
+  },
+
+  clearCategoryHighlight() {
+    clearHighlightedCategory();
+  },
+};
 ```
 
 Native call sites:
 
 ```kotlin
-// app/src/main/java/com/visioglobe/visioonemeet/ui/FeatureOverlays.kt — native bridge wrappers
-private fun WebView.getCategories(requestId: Int) {
-    val script = "window.MapBridge.getCategories($requestId)"
-    evaluateJavascript(script, null)
-}
+// app/src/main/java/com/visioglobe/visioonemeet/features/CategoryHighlight.kt
+private fun WebView.getCategories(requestId: Int) = callBridge("getCategories", requestId)
 
-private fun WebView.highlightCategory(categoryId: String) {
-    val script = "window.MapBridge.highlightCategory(${JSONObject.quote(categoryId)})"
-    evaluateJavascript(script, null)
-}
+private fun WebView.highlightCategory(categoryId: String) = callBridge("highlightCategory", categoryId)
 
-private fun WebView.clearCategoryHighlight() {
-    evaluateJavascript("window.MapBridge.clearCategoryHighlight()", null)
-}
+private fun WebView.clearCategoryHighlight() = callBridge("clearCategoryHighlight")
 ```
 
 `getCategories`'s result comes back asynchronously on the native side, echoing `requestId`, same convention as `custom-data.md`'s `loadCustomData`:
 
 ```kotlin
-// FeatureMapScreen.kt
+// app/src/main/java/com/visioglobe/visioonemeet/bridge/NativeBridge.kt
 @JavascriptInterface
 fun onCategoriesLoaded(requestId: Int, categoriesJson: String) =
-    notifyCategoriesLoaded(requestId, categoriesJson)
+    emit(BridgeEvent.CategoriesLoaded(requestId, categoriesJson))
 ```
 
 `venue.categories: Category[]`, `poi.categories: Category[]` and `poi.surfaces: Surface[]` are the properties read; `venue.updateSurface(surface: Surface, options: SurfaceUpdateOptions): void` is the only mutating call, same method used by `clickable-surface.md`/`occupancy-simulated.md`.
@@ -96,7 +90,7 @@ fun onCategoriesLoaded(requestId: Int, categoriesJson: String) =
 - **Not every POI has surfaces.** `poi.surfaces` is an empty array for point/marker-only POIs (e.g. outdoor markers with `type: -1`), so `updateSurface` simply has nothing to iterate for them — they don't visually highlight even though they may belong to the selected category. This is expected, not a bug; it means "highlight by category" only ever affects POIs that have an actual surface geometry (rooms, shops, zones), not marker-only points of interest.
 - **`color: 'initial'` is the correct reset sentinel, not `undefined`.** Per `SurfaceUpdateOptions`'s own doc comment, `'initial'` tells the SDK to restore the surface's bundle-defined color. Omitting the `color` key (or passing `undefined`) is not equivalent — it simply leaves the color update out of that particular `updateSurface` call, which does not revert a color set by an earlier call. Always pass `'initial'` explicitly to clear a highlight, same gotcha documented in `clickable-surface.md`.
 - **Only one category highlighted at a time is a demo-side choice, not an SDK limitation.** The SDK has no concept of a "current" highlighted category — this repo's `highlightCategory` tracks the previously highlighted category id itself and reverts its POIs' surfaces before applying the new selection, so calling it repeatedly with different ids never leaves more than one category's POIs highlighted simultaneously. An integrator wanting several categories highlighted at once (e.g. different colors per category) can simply skip that revert step.
-- **`Category.id` is a raw internal identifier, not a display name.** Despite `Category`'s own doc comment suggesting `id` is "its name translated in default language", live testing against this app's shared demo map (`DemoMap.MAP_HASH`) shows `id` is actually a plain numeric string (`"1"`, `"2"`, … `"11"`). The real, resolved display name comes from `venue.translator.translateCategory(category, venue.currentLocale).name` — the same `Translator` API already used for POI/floor names elsewhere in this file (`getVenueLayout`/`onPoiClick`). `id` remains what filtering/highlighting must use; `label` is for display only.
+- **`Category.id` is a raw internal identifier, not a display name.** Despite `Category`'s own doc comment suggesting `id` is "its name translated in default language", live testing against this app's shared demo map (`DemoMap.MAP_HASH`) shows `id` is actually a plain numeric string (`"1"`, `"2"`, … `"11"`). The real, resolved display name comes from `venue.translator.translateCategory(category, venue.currentLocale).name` — the same `Translator` API already used for POI/floor names elsewhere in the page (`buildingFloorsPayload` in `web/src/features/floor-selector.js`, `onPoiClick` in `web/src/features/poi-click.js`). `id` remains what filtering/highlighting must use; `label` is for display only.
 
 ## Learn more
 

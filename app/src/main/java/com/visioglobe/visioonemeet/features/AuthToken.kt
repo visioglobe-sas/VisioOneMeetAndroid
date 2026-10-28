@@ -1,5 +1,6 @@
-package com.visioglobe.visioonemeet.ui
+package com.visioglobe.visioonemeet.features
 
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -15,16 +16,18 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.visioglobe.visioonemeet.R
 
+// auth-token — JS side: web/src/features/auth-token.js. See docs/features/auth-token.md.
+
 /**
  * `auth-token` screen: a text page only. This demo has no protected map, so it never loads one —
  * the actual deliverable is the code sample in `sample/ProtectedMapSample.kt`, which no screen
- * calls. See docs/features/auth-token.md.
+ * calls.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AuthTokenSampleScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
+fun AuthTokenScreen(onBack: () -> Unit) {
     Scaffold(
-        modifier = modifier,
+        modifier = Modifier.fillMaxSize(),
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.feature_auth_token_title)) },

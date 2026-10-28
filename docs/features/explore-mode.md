@@ -13,6 +13,7 @@ There are 3 modes:
 ## SDK usage
 
 ```js
+// web/src/features/explore-mode.js (in `mapBridge`)
 setExploreMode(mode) {
   if (!view) return;
   view.currentExploreMode = mode;
@@ -22,18 +23,29 @@ setExploreMode(mode) {
 Staying in sync afterward — including changes triggered by map interaction, not just this call:
 
 ```js
-view.addEventListener('exploremodechanged', (event) => {
-  bridge?.onExploreModeChanged(event.currentExploreMode);
-});
+// web/src/features/explore-mode.js
+function onExploreModeChanged(event) {
+  notify('onExploreModeChanged', event.currentExploreMode);
+}
+
+export function onViewCreated() {
+  view.addEventListener('exploremodechanged', onExploreModeChanged);
+  notify('onExploreModeChanged', view.currentExploreMode); // initial state
+}
 ```
 
-Native call site:
+Native call site and callback:
 
 ```kotlin
-private fun WebView.setExploreMode(mode: String) {
-    val script = "window.MapBridge.setExploreMode(${JSONObject.quote(mode)})"
-    evaluateJavascript(script, null)
-}
+// app/src/main/java/com/visioglobe/visioonemeet/features/ExploreMode.kt
+private fun WebView.setExploreMode(mode: String) = callBridge("setExploreMode", mode)
+
+OnBridgeEvent<BridgeEvent.ExploreModeChanged>(map) { currentExploreMode = it.mode }
+```
+```kotlin
+// app/src/main/java/com/visioglobe/visioonemeet/bridge/NativeBridge.kt
+@JavascriptInterface
+fun onExploreModeChanged(mode: String) = emit(BridgeEvent.ExploreModeChanged(mode))
 ```
 
 ## Things to know

@@ -7,16 +7,18 @@ Toggles individual pieces of the SDK's default on-map UI via `view.setUIPartVisi
 ## SDK usage
 
 ```js
-setUIPartVisible(uiPart, isVisible) {
-  if (!view) return;
-  view.setUIPartVisible(uiPart, isVisible);
-},
+// web/src/features/ui-part-visibility.js
+export const mapBridge = {
+  setUIPartVisible(uiPart, isVisible) {
+    if (!view) return;
+    view.setUIPartVisible(uiPart, isVisible);
+  },
+};
 ```
 ```kotlin
-private fun WebView.setUiPartVisible(uiPart: String, isVisible: Boolean) {
-    val script = "window.MapBridge.setUIPartVisible(${JSONObject.quote(uiPart)}, $isVisible)"
-    evaluateJavascript(script, null)
-}
+// app/src/main/java/com/visioglobe/visioonemeet/features/UiPartVisibility.kt
+internal fun WebView.setUiPartVisible(uiPart: String, isVisible: Boolean) =
+    callBridge("setUIPartVisible", uiPart, isVisible)
 ```
 
 ## Things to know

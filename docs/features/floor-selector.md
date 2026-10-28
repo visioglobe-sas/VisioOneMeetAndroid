@@ -9,6 +9,7 @@ The SDK already ships its own default floor-selector widget on the map (`UIPart 
 ## SDK usage
 
 ```js
+// web/src/features/floor-selector.js (in `mapBridge`)
 goToFloor(buildingId, floorId) {
   if (!venue || !view) return;
   const building = venue.venueLayout.buildings.find((b) => b.id === buildingId);
@@ -22,6 +23,7 @@ goToFloor(buildingId, floorId) {
 Reading the floor list once, and staying in sync afterward:
 
 ```js
+// web/src/features/floor-selector.js
 function buildingFloorsPayload(building) {
   const locale = venue.currentLocale;
   return {
@@ -35,22 +37,37 @@ function buildingFloorsPayload(building) {
   };
 }
 
-// once, right after the venue/view are ready, for the first building:
-bridge?.onFloorsReady(JSON.stringify(buildingFloorsPayload(venue.venueLayout.buildings[0])));
-
 // kept in sync afterwards, including floor changes triggered by other means:
-view.addEventListener('currentfloorchanged', (event) => {
-  bridge?.onFloorChanged(event.newFloor?.id ?? null);
-});
+function onCurrentFloorChanged(event) {
+  notify('onFloorChanged', event.newFloor?.id ?? null);
+}
+
+// run once, right after the venue/view are ready:
+export function onViewCreated() {
+  view.addEventListener('currentfloorchanged', onCurrentFloorChanged);
+  const building = venue.venueLayout.buildings[0];
+  if (building) {
+    notify('onFloorsReady', JSON.stringify(buildingFloorsPayload(building)));
+  }
+}
 ```
 
-Native call site:
+Native call site and callbacks:
 
 ```kotlin
-private fun WebView.goToFloor(buildingId: String, floorId: String) {
-    val script = "window.MapBridge.goToFloor(${JSONObject.quote(buildingId)}, ${JSONObject.quote(floorId)})"
-    evaluateJavascript(script, null)
-}
+// app/src/main/java/com/visioglobe/visioonemeet/features/FloorSelector.kt
+private fun WebView.goToFloor(buildingId: String, floorId: String) = callBridge("goToFloor", buildingId, floorId)
+
+OnBridgeEvent<BridgeEvent.FloorsReady>(map) { state = parseFloorsReadyPayload(it.floorsJson) }
+OnBridgeEvent<BridgeEvent.FloorChanged>(map) { state = state.copy(currentFloorId = it.floorId) }
+```
+```kotlin
+// app/src/main/java/com/visioglobe/visioonemeet/bridge/NativeBridge.kt
+@JavascriptInterface
+fun onFloorsReady(payload: String) = emit(BridgeEvent.FloorsReady(payload))
+
+@JavascriptInterface
+fun onFloorChanged(floorId: String?) = emit(BridgeEvent.FloorChanged(floorId))
 ```
 
 ## Things to know

@@ -7,47 +7,52 @@ Recolors the tracked position's precision (accuracy) circle via `view.updatePosi
 ## SDK usage
 
 ```js
+// web/src/features/accuracy-circle-style.js
 // Style kept app-side: the SDK has no getter for it and resets it whenever tracking stops.
 let positionTrackerStyle = null;
 
-// Returns whether the SDK accepted the style (it throws on an invalid color).
-setPositionTrackerStyle(color, opacity) {
-  if (!view) return false;
-  try {
-    view.updatePositionTrackerGraphicOptions({ color, opacity });
-    positionTrackerStyle = { color, opacity };
-    return true;
-  } catch (error) {
-    console.error('updatePositionTrackerGraphicOptions failed', error);
-    return false;
-  }
-},
+// Called by simulated-position's injectTrackedPosition on every tracking false -> true transition.
+export function reapplyPositionTrackerStyle() {
+  if (positionTrackerStyle) view.updatePositionTrackerGraphicOptions(positionTrackerStyle);
+}
 
+export const mapBridge = {
+  // Returns whether the SDK accepted the style (it throws on an invalid color).
+  setPositionTrackerStyle(color, opacity) {
+    if (!view) return false;
+    try {
+      view.updatePositionTrackerGraphicOptions({ color, opacity });
+      positionTrackerStyle = { color, opacity };
+      return true;
+    } catch (error) {
+      console.error('updatePositionTrackerGraphicOptions failed', error);
+      return false;
+    }
+  },
+};
+
+// web/src/features/simulated-position.js (mapBridge)
 injectTrackedPosition(latitude, longitude, precisionCircleRadius) {
   if (!view) return;
   const wasTracking = view.allowTracking;
   if (!wasTracking) view.allowTracking = true;
   // Re-apply the chosen style on every (re)start, before the first inject.
-  if (!wasTracking && positionTrackerStyle) {
-    view.updatePositionTrackerGraphicOptions(positionTrackerStyle);
-  }
+  if (!wasTracking) reapplyPositionTrackerStyle();
   view.injectTrackedPosition({ position: { latitude, longitude }, precisionCircleRadius });
 },
 ```
 ```kotlin
-// onApplied only runs if the SDK accepted the style: evaluateJavascript's callback receives the
-// JS return value, JSON-encoded ("true"/"false").
+// app/src/main/java/com/visioglobe/visioonemeet/features/AccuracyCircleStyle.kt
+// onApplied only runs if the SDK accepted the style: callBridge's onResult (evaluateJavascript's
+// callback) receives the JS return value, JSON-encoded ("true"/"false").
 private fun WebView.setPositionTrackerStyle(color: String, opacity: Float, onApplied: () -> Unit) {
     val roundedOpacity = (opacity * 10).roundToInt() / 10.0
-    evaluateJavascript(
-        "window.MapBridge.setPositionTrackerStyle(${JSONObject.quote(color)}, $roundedOpacity)",
-    ) { result -> if (result == "true") onApplied() }
+    callBridge("setPositionTrackerStyle", color, roundedOpacity) { result -> if (result == "true") onApplied() }
 }
 
-private fun WebView.injectTrackedPosition(latitude: Double, longitude: Double, precisionCircleRadiusMeters: Double) {
-    val script = "window.MapBridge.injectTrackedPosition($latitude, $longitude, $precisionCircleRadiusMeters)"
-    evaluateJavascript(script, null)
-}
+// app/src/main/java/com/visioglobe/visioonemeet/features/SimulatedPosition.kt
+private fun WebView.injectTrackedPosition(latitude: Double, longitude: Double, precisionCircleRadiusMeters: Double) =
+    callBridge("injectTrackedPosition", latitude, longitude, precisionCircleRadiusMeters)
 ```
 
 Signature: `updatePositionTrackerGraphicOptions(options: { color?: Color; opacity?: number }): void`.

@@ -9,29 +9,31 @@ Triggers a visual alert when a simulated tracked position enters a zone defined 
 Resolving a zone POI's polygon:
 
 ```js
+// web/src/features/geofencing.js (in `mapBridge`)
 resolveZone(requestId, placeId) {
   if (!venue) return;
-  const poi = venue.pois.find((p) => p.id === placeId);
+  const poi = findPoi(placeId); // venue.pois.find((p) => p.id === placeId)
   if (!poi) {
     geofenceZone = null;
-    bridge?.onZoneResolved(requestId, 'not-found');
+    notify('onZoneResolved', requestId, 'not-found');
     return;
   }
   if (!poi.surfaces.length) {
     geofenceZone = null;
-    bridge?.onZoneResolved(requestId, 'no-surface');
+    notify('onZoneResolved', requestId, 'no-surface');
     return;
   }
   geofenceZone = { surfaces: poi.surfaces };
   isInsideGeofenceZone = false;
-  bridge?.onZoneResolved(requestId, 'found');
+  notify('onZoneResolved', requestId, 'found');
 },
 ```
 
 Testing a position on every tick of the tracked-position simulation loop (see `simulated-position.md`), and recoloring the zone's surface(s) on a state transition:
 
 ```js
-function isPositionInsidePolygon(position, polygonPositions) {
+// web/src/shared/geometry.js
+export function isPositionInsidePolygon(position, polygonPositions) {
   const { latitude: y, longitude: x } = position;
   let inside = false;
   for (let i = 0, j = polygonPositions.length - 1; i < polygonPositions.length; j = i++) {
@@ -44,7 +46,9 @@ function isPositionInsidePolygon(position, polygonPositions) {
   }
   return inside;
 }
-
+```
+```js
+// web/src/features/geofencing.js (in `mapBridge`)
 checkGeofence(latitude, longitude) {
   if (!venue || !geofenceZone) return;
   const isInside = geofenceZone.surfaces.some((surface) =>
@@ -56,22 +60,29 @@ checkGeofence(latitude, longitude) {
       venue.updateSurface(surface, { color: isInside ? GEOFENCE_ALERT_COLOR : 'initial' });
     });
   }
-  bridge?.onGeofenceStateChanged(isInside);
+  notify('onGeofenceStateChanged', isInside);
 },
 ```
 
-Native call site:
+Native call sites and callbacks:
 
 ```kotlin
-private fun WebView.resolveZone(requestId: Int, placeId: String) {
-    val script = "window.MapBridge.resolveZone($requestId, ${JSONObject.quote(placeId)})"
-    evaluateJavascript(script, null)
-}
+// app/src/main/java/com/visioglobe/visioonemeet/features/Geofencing.kt
+private fun WebView.resolveZone(requestId: Int, placeId: String) = callBridge("resolveZone", requestId, placeId)
 
-private fun WebView.checkGeofence(latitude: Double, longitude: Double) {
-    val script = "window.MapBridge.checkGeofence($latitude, $longitude)"
-    evaluateJavascript(script, null)
-}
+private fun WebView.checkGeofence(latitude: Double, longitude: Double) =
+    callBridge("checkGeofence", latitude, longitude)
+
+OnBridgeEvent<BridgeEvent.ZoneResolved>(map) { session.onZoneResolved(it) }
+OnBridgeEvent<BridgeEvent.GeofenceStateChanged>(map) { session.isInsideZone = it.isInside }
+```
+```kotlin
+// app/src/main/java/com/visioglobe/visioonemeet/bridge/NativeBridge.kt
+@JavascriptInterface
+fun onZoneResolved(requestId: Int, status: String) = emit(BridgeEvent.ZoneResolved(requestId, status))
+
+@JavascriptInterface
+fun onGeofenceStateChanged(isInside: Boolean) = emit(BridgeEvent.GeofenceStateChanged(isInside))
 ```
 
 `checkGeofence` is called every tick right after `injectTrackedPosition`, from the same interpolation loop `simulated-position` already runs.

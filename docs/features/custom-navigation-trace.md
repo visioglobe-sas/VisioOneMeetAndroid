@@ -23,6 +23,7 @@ venue.updateNavigationTrace(trace, {
 Native call site and the JS side of the bridge:
 
 ```kotlin
+// app/src/main/java/com/visioglobe/visioonemeet/features/CustomNavigationTrace.kt
 private fun WebView.updateNavigationTraceStyle(colors: NavigationTraceColors) {
     val options = JSONObject().apply {
         put("progressColor", colors.progressColor)
@@ -31,12 +32,13 @@ private fun WebView.updateNavigationTraceStyle(colors: NavigationTraceColors) {
         put("previewColor", colors.previewColor)
         put("previewOutlineColor", colors.previewOutlineColor)
     }
-    evaluateJavascript("window.MapBridge.updateNavigationTraceStyle($options)", null)
+    callBridge("updateNavigationTraceStyle", options)
 }
 ```
 
 ```js
-// window.MapBridge, JS side
+// web/src/features/custom-navigation-trace.js (in `mapBridge`) — currentNavigationTrace is
+// imported from compute-navigation.js
 updateNavigationTraceStyle(options) {
   if (!venue || !currentNavigationTrace) return;
   try {
