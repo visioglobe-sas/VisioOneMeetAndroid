@@ -63,19 +63,24 @@ private class GeofencingSession {
         private set
     var isInsideZone by mutableStateOf(false)
     private var pendingZoneRequestId: Int? = null
+    private var isZoneRequested = false
 
     /**
      * Start resolves the zone once via [resolveZone]; Stop calls [clearZone] (reverting the zone's
-     * color and forgetting it, so restarting always begins from a clean, unresolved zone).
+     * color and forgetting it, so restarting always begins from a clean, unresolved zone). The
+     * initial "not running" report, before any Start, clears nothing: the page may not even be
+     * loaded yet.
      */
     fun onRunningChanged(webView: WebView?, running: Boolean) {
         if (running) {
             zoneError = null
             val requestId = nextBridgeRequestId()
             pendingZoneRequestId = requestId
+            isZoneRequested = true
             webView?.resolveZone(requestId, zoneId.trim())
-        } else {
+        } else if (isZoneRequested) {
             pendingZoneRequestId = null
+            isZoneRequested = false
             webView?.clearZone()
         }
     }
